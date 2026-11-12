@@ -159,7 +159,7 @@ describe("function config (#577)", () => {
   it("membership answers every routed path", async () => {
     assert.deepEqual(config.path, [
       "/api/membership", "/api/membership/qr", "/api/membership/remove",
-      "/api/membership/leave",
+      "/api/membership/leave", "/api/membership/code",
     ]);
 
     for (const path of config.path) {

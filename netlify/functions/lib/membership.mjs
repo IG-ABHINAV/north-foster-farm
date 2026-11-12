@@ -23,6 +23,8 @@ import {
   GROUPS, getGroupRecord, groupOf, joinUrl, leaveGroup, memberKeyOf,
   namedGroup, privatePlaces,
 } from "./groups.mjs";
+import { ensureMemberId } from "./member-id.mjs";
+import { qrSvg } from "./qr.mjs";
 import { getCustomer } from "./records.mjs";
 
 // Every group whose host this address is: none, one or more.
@@ -170,6 +172,26 @@ export const hostMembers = async (stores, key) =>
     email: m.email, name: m.name, joinedAt: m.joinedAt, via: m.via,
   }));
 
+// The member's own code (#131), minted the first time their tab asks
+// for it, which logs it as the member's act. With `mint` false (the
+// site in maintenance) only one already minted is shown.
+// -> { id } or null.
+export const memberCode = async (stores, email, {
+  now = new Date(), mint = true,
+} = {}) => {
+  const own = await ensureMemberId(stores, email, {
+    by: { role: "member", email }, now, apply: mint,
+  });
+
+  return own && own.memberId ? { id: own.memberId } : null;
+};
+
+// The code as the tab and the key tag draw it: dark on white, sized by
+// the page. The QR holds the code alone, as plain text, which is what
+// the Square Point of Sale app reads at the stand.
+export const memberCodeSvg = (id) =>
+  qrSvg(id, { title: `Member code ${id}` });
+
 // The host's join QR code as the tab takes it: its version, and the
 // link it encodes for the field beside it (#579), which only a host
 // ever receives. `link` is null before the group's first token, which
@@ -179,16 +201,21 @@ export const hostQr = (record, env = process.env) => ({
   link: record && record.joinToken ? joinUrl(record.joinToken, env) : null,
 });
 
-// What the tab shows: the member's own group, and every group they
-// host with its QR code and members. When both are the same group, it
-// is in both. The join link is in the host's part alone.
-// -> { member: { key, group, rounds } | null,
+// What the tab shows: the member's own group and code, and every group
+// they host with its QR code and members. When both are the same group,
+// it is in both. `email` is the signed-in address, for the code, and
+// `mint` as for memberCode. The join link is in the host's part alone.
+// -> { member: { key, group, rounds, code } | null,
 // hosts: [{ key, group, rounds, qr: { setAt, link }, members }] }
 export const membershipView = async (stores, role, {
-  terms, now, env = process.env,
+  terms, now, email, mint = true, env = process.env,
 }) => ({
   member: role.member
-    ? await groupView(stores, role.member, { terms, now }) : null,
+    ? {
+      ...(await groupView(stores, role.member, { terms, now })),
+      code: email ? await memberCode(stores, email, { now, mint }) : null,
+    }
+    : null,
   hosts: await Promise.all(role.hosts.map(async (g) => {
     const record = await getGroupRecord(stores, g.key);
 

@@ -11,6 +11,8 @@
 //   POST /api/membership/remove     { group, email } the host takes a
 //                                   member out (#495, part 6)
 //   POST /api/membership/leave      {} a member leaves their own group
+//   GET  /api/membership/code       the member's own code (#131) as a
+//                                   QR code, SVG; &download=1 saves it
 //
 // 401 with no session. Anyone who is neither a group's member nor a
 // host gets 404. A host's request names the group it acts on, and
@@ -33,7 +35,8 @@ import { json, readJson } from "./lib/http.mjs";
 import { withLog } from "./lib/log.mjs";
 import { gate } from "./lib/maintenance.mjs";
 import {
-  hostMembers, hostQr, hostedBy, membershipView, removeMember, roleOf,
+  hostMembers, hostQr, hostedBy, memberCode, memberCodeSvg, membershipView,
+  removeMember, roleOf,
 } from "./lib/membership.mjs";
 import { stores as defaultStores } from "./lib/store.mjs";
 
@@ -47,7 +50,7 @@ const NOTHING = () => json(404, { error: "Not found." });
 export const config = {
   path: [
     "/api/membership", "/api/membership/qr", "/api/membership/remove",
-    "/api/membership/leave",
+    "/api/membership/leave", "/api/membership/code",
   ],
 };
 
@@ -57,14 +60,14 @@ export const NOT_IN = "That person isn't in the group.";
 
 // The QR code, the current token's, never cached: after a rotation
 // the next request is the new one.
-const svg = (body, { download, key }) => new Response(body, {
+const svg = (body, { download, name }) => new Response(body, {
   status: 200,
   headers: {
     "Content-Type": "image/svg+xml; charset=utf-8",
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     ...(download
-      ? { "Content-Disposition": `attachment; filename="join-${key}-qr.svg"` }
+      ? { "Content-Disposition": `attachment; filename="${name}"` }
       : {}),
   },
 });
@@ -91,8 +94,28 @@ export const handle = async (req, {
   if (!role) return NOTHING();
 
   if (path === "/api/membership" && req.method === "GET") {
-    return json(200, await membershipView(stores, role, { terms, now, env }),
-      { "Cache-Control": "no-store" });
+    // A member's first look mints their code (#131), a write, which
+    // waits while the site is in maintenance.
+    const mint = role.member ? !(await gate(stores)) : false;
+
+    return json(200, await membershipView(stores, role, {
+      terms, now, email: session.email, mint, env,
+    }),{ "Cache-Control": "no-store" });
+  }
+
+  // The member's own code as a QR code (#131), for the tab and the key
+  // tag. Only one already minted: the tab asks /api/membership first.
+  if (path === "/api/membership/code" && req.method === "GET") {
+    if (!role.member) return NOTHING();
+
+    const code = await memberCode(stores, session.email, { now, mint: false });
+
+    if (!code) return NOTHING();
+
+    return svg(memberCodeSvg(code.id), {
+      download: url.searchParams.get("download") === "1",
+      name: `member-code-${code.id}.svg`,
+    });
   }
 
   // A member's own Leave group, with its confirmation on the page.
@@ -152,7 +175,8 @@ export const handle = async (req, {
     const token = await joinTokenOf(stores, key, { now });
 
     return svg(joinQr(token, name, { env }).svg, {
-      download: url.searchParams.get("download") === "1", key,
+      download: url.searchParams.get("download") === "1",
+      name: `join-${key}-qr.svg`,
     });
   }
 

@@ -38,10 +38,17 @@ import { stores as defaultStores } from "./lib/store.mjs";
 
 const NOTHING = () => json(404, { error: "Not found." });
 
-const PATHS = [
-  "/api/membership", "/api/membership/qr", "/api/membership/remove",
-  "/api/membership/leave",
-];
+// Netlify reads `config` from the source at build time and takes only
+// literals: a path named by a variable deploys with no route at all,
+// and every request falls through to the site's 404 (#577). The
+// handler checks this same list, so there is one copy.
+// test/function-config.test.mjs holds every function to it.
+export const config = {
+  path: [
+    "/api/membership", "/api/membership/qr", "/api/membership/remove",
+    "/api/membership/leave",
+  ],
+};
 
 // Draft wording for James.
 export const SELF = "To leave the group yourself, use Leave group.";
@@ -69,7 +76,7 @@ export const handle = async (req, {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "");
 
-  if (!PATHS.includes(path)) return NOTHING();
+  if (!config.path.includes(path)) return NOTHING();
   if (req.method === "POST" && !sameSite(req)) {
     return json(403, { error: "Cross-site request." });
   }
@@ -168,5 +175,3 @@ export const handle = async (req, {
 };
 
 export default withLog("membership", async (req) => handle(req));
-
-export const config = { path: PATHS };

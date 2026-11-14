@@ -1,12 +1,13 @@
 // The Membership tab (#495, part 5):
 //
-//   GET  /api/membership            a member's and a host's view
+//   GET  /api/membership            a member's and a host's view; a
+//                                   host's holds the join link (#579)
 //   GET  /api/membership/qr         ?group=<key> the host's join QR
 //                                   code, as SVG; &download=1 saves it
 //                                   as a file
 //   POST /api/membership/qr         { group, rotate: true } the host
-//                                   replaces it; the old one stops at
-//                                   once
+//                                   replaces it and its link; the old
+//                                   ones stop at once
 //   POST /api/membership/remove     { group, email } the host takes a
 //                                   member out (#495, part 6)
 //   POST /api/membership/leave      {} a member leaves their own group
@@ -32,7 +33,7 @@ import { json, readJson } from "./lib/http.mjs";
 import { withLog } from "./lib/log.mjs";
 import { gate } from "./lib/maintenance.mjs";
 import {
-  hostMembers, hostedBy, membershipView, removeMember, roleOf,
+  hostMembers, hostQr, hostedBy, membershipView, removeMember, roleOf,
 } from "./lib/membership.mjs";
 import { stores as defaultStores } from "./lib/store.mjs";
 
@@ -90,7 +91,7 @@ export const handle = async (req, {
   if (!role) return NOTHING();
 
   if (path === "/api/membership" && req.method === "GET") {
-    return json(200, await membershipView(stores, role, { terms, now }),
+    return json(200, await membershipView(stores, role, { terms, now, env }),
       { "Cache-Control": "no-store" });
   }
 
@@ -168,7 +169,8 @@ export const handle = async (req, {
 
     await audit(stores, { group: key, by, action: "qr.rotate", now });
 
-    return json(200, { ok: true, qr: { setAt: record.joinTokenSetAt } });
+    // The new link with the new code: the field beside it changes too.
+    return json(200, { ok: true, qr: hostQr(record, env) });
   }
 
   return NOTHING();

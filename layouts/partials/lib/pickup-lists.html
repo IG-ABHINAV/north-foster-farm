@@ -27,6 +27,7 @@
       "when" (print (printf "%ss" (time.AsTime $s.start).Weekday) ", " $window)
       "where" (print $loc.name ", " $loc.street ", " $loc.city)
       "venue" $loc.name
+      "search" (print ($loc.listing | default $loc.name) ", " $loc.street ", " $loc.city)
       "street" $loc.street
       "city" $loc.city
       "state" $loc.state
@@ -45,6 +46,7 @@
       "kind" "pop-up"
       "name" $s.name
       "place" $loc.name
+      "slug" ($loc.slug | default ($loc.name | urlize))
       "date" $s.start
       "start" $s.opens
       "end" $s.closes

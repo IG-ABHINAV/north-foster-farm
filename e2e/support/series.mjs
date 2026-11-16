@@ -23,6 +23,8 @@ export const events = seriesData.series
       kind: "pop-up",
       name: s.name,
       place: loc.name,
+      // The map card's anchor when it must not follow the name (#581).
+      slug: loc.slug,
       date: s.start,
       start: s.opens,
       end: s.closes,

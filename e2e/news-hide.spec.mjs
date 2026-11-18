@@ -7,6 +7,7 @@
 import {
   OrderPage, expect, test, uniqueEmail,
 } from "./support/order.mjs";
+import { settled } from "./support/settled.mjs";
 
 const PAGES = [
   {
@@ -196,21 +197,23 @@ test.describe("the order page's farm news opt-in (#391)", () => {
 
 test("a hidden form leaves no gap, a shown one does not move",
   async ({ page, context, baseURL }) => {
-    await page.goto("/about/");
+    // Each view waits for the market's pickup line (settled.mjs), or
+    // a view measured before it shows is a line short.
+    await settled(page, () => page.goto("/about/"));
 
     const height = () => page.evaluate(
       () => document.documentElement.scrollHeight);
     const shown = await height();
 
     await page.evaluate(() => localStorage.setItem("nff-news", "joined"));
-    await page.reload();
+    await settled(page, () => page.reload());
     await expect(page.locator("footer [data-farm-list-block]")).toBeHidden();
     expect(await height()).toBeLessThan(shown);
 
     await stamp(context, baseURL);
     await page.evaluate(() => localStorage.removeItem("nff-news"));
     await me(page, false);
-    await page.reload();
+    await settled(page, () => page.reload());
 
     const block = page.locator("footer [data-farm-list-block]");
 

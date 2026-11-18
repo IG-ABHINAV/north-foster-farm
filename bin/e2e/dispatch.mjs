@@ -30,7 +30,11 @@ export const USAGE = `
                                       named skip the table; --all takes
                                       every spec it names. The branch
                                       must be pushed. --dry-run prints
-                                      the choice and dispatches nothing`
+                                      the choice and dispatches nothing.
+                                      Exits 0 passed, 1 failed, 2
+                                      nothing dispatched, 3 no verdict
+                                      (GitHub did not answer, or the run
+                                      outlasted the wait)`
   .slice(1);
 
 export const BASE = "origin/next";
@@ -39,6 +43,16 @@ export const WORKFLOW = "e2e.yml";
 // at most, since every lane shares one API rate limit.
 export const LOOK_EVERY_MS = 3 * 60 * 1000;
 export const GIVE_UP_MS = 4 * 60 * 60 * 1000;
+// The most looks at a run in a row that may fail (a 404, or gh failing
+// any other way) before the command gives up on a verdict (#623). A
+// look that answers resets the count.
+export const LOOK_TRIES = 3;
+// The exit codes: the run passed, failed; nothing was dispatched; the
+// run was dispatched but how it ended is unknown.
+export const PASSED = 0;
+export const FAILED = 1;
+export const NOT_DISPATCHED = 2;
+export const NO_VERDICT = 3;
 // The workflow refuses named specs on these: the run would cancel theirs.
 const PROMOTED = new Set(["next", "staging", "main"]);
 // The run's jobs that only gather the others' results.
@@ -123,13 +137,14 @@ export const checkBase = (base) => !!base && !base.startsWith("-");
 
 // Text from a log or the API with every C0 and C1 control character
 // gone, colors and other escape sequences first, so none reaches the
-// terminal.
+// terminal. Bidi overrides and isolates go too, so none reorders a
+// line.
 /* eslint-disable no-control-regex -- control characters are the point */
 export const printable = (text) => String(text)
   .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
   .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, "")
   .replace(/\t/g, " ")
-  .replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+  .replace(/[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]/g, "");
 /* eslint-enable no-control-regex */
 
 // The failing tests in a job's log, from Playwright's closing list
@@ -197,11 +212,16 @@ export const changedArgs = (base) => ["diff", "--name-only",
   "--no-renames", "--end-of-options", `${base}...HEAD`];
 
 // GitHub's REST API through gh, signed in already: parsed JSON, or the
-// text of a log.
+// text of a log. gh refuses an answer holding an escape sequence, as a
+// Playwright log's colors do, unless told to pass it (#623); what it
+// passes is printed only through printable().
+export const ghArgs = (path, { method = "GET", body } = {}) => ["api",
+  "-X", method, "--allow-escape-sequences", path,
+  ...(body === undefined ? [] : ["--input", "-"])];
+
 export const ghApi = (path, { method = "GET", body } = {}) =>
   new Promise((resolve, reject) => {
-    const args = ["api", "-X", method, path,
-      ...(body === undefined ? [] : ["--input", "-"])];
+    const args = ghArgs(path, { method, body });
     const child = spawn("gh", args, { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -215,8 +235,11 @@ export const ghApi = (path, { method = "GET", body } = {}) =>
     child.on("error", reject);
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`gh api ${method} ${path}: ${
-          stderr.trim() || stdout.trim() || `exit ${code}`}`));
+        const said = (stderr.trim() || stdout.trim() || `exit ${code}`)
+          .split("\n").map(printable).join("\n");
+
+        reject(new Error(`gh api ${printable(method)} ${printable(path)}: ${
+          said}`));
 
         return;
       }
@@ -314,7 +337,7 @@ const report = async (api, run, out) => {
   }
 
   out(`${run.conclusion === "failure" ? "Failed"
-    : `Failed (${run.conclusion})`}: ${run.html_url}`);
+    : `Failed (${printable(run.conclusion)})`}: ${printable(run.html_url)}`);
   if (tests.size) {
     for (const f of tests.values()) out(failureLine(f));
 
@@ -418,28 +441,80 @@ export const e2eCommand = async (args, { flags = {}, out }, deps = {}) => {
     });
   const id = dispatched.workflow_run_id;
 
-  out(`Dispatched on ${ref}: ${dispatched.html_url}`);
+  const url = printable(dispatched.html_url);
+
+  out(`Dispatched on ${ref}: ${url}`);
   out(`Waiting; one look every ${LOOK_EVERY_MS / 60000} minutes.`);
 
-  let run = await d.api(runPath(id));
+  // From here on the command resolves to a code and never rejects.
+  try {
+    return await verdict(d, id, url, out);
+  } catch (error) {
+    noVerdict(out, url, `it stopped on ${firstLine(error)}`);
 
-  for (let waited = 0; run.status !== "completed"; waited += LOOK_EVERY_MS) {
-    if (waited >= GIVE_UP_MS) {
-      out(`Still ${run.status} after ${GIVE_UP_MS / 3600000} hours; `
-        + `stopped waiting: ${run.html_url}`);
-
-      return 1;
-    }
-    await d.wait(LOOK_EVERY_MS);
-    run = await d.api(runPath(id));
+    return NO_VERDICT;
   }
+};
+
+const firstLine = (error) => printable(String(error?.message || error)
+  .split("\n")[0]).slice(0, 200);
+
+const noVerdict = (out, url, why) => {
+  out(`No verdict: ${why}, so it is not known how the run ended.`);
+  out(`See the run: ${url}`);
+};
+
+// One look at the run, looking again after a failed answer until
+// LOOK_TRIES fail in a row. -> { run } or { error }
+const look = async (d, id, out, pause) => {
+  for (let failed = 1; ; failed += 1) {
+    try {
+      return { run: await d.api(runPath(id)) };
+    } catch (error) {
+      if (failed >= LOOK_TRIES) return { error };
+      out(`GitHub did not answer (${firstLine(error)}); looking again.`);
+      await pause();
+    }
+  }
+};
+
+const verdict = async (d, id, url, out) => {
+  let waited = 0;
+  const pause = async () => {
+    await d.wait(LOOK_EVERY_MS);
+    waited += LOOK_EVERY_MS;
+  };
+  let seen = await look(d, id, out, pause);
+
+  while (seen.run && seen.run.status !== "completed") {
+    if (waited >= GIVE_UP_MS) {
+      noVerdict(out, url, `the run was still ${printable(seen.run.status)} `
+        + `after ${GIVE_UP_MS / 3600000} hours and it stopped waiting`);
+
+      return NO_VERDICT;
+    }
+    await pause();
+    seen = await look(d, id, out, pause);
+  }
+  if (seen.error) {
+    noVerdict(out, url, `GitHub did not answer ${LOOK_TRIES} looks in a row `
+      + `(${firstLine(seen.error)})`);
+
+    return NO_VERDICT;
+  }
+  const { run } = seen;
 
   if (run.conclusion === "success") {
-    out(`Passed: ${run.html_url}`);
+    out(`Passed: ${printable(run.html_url)}`);
 
-    return 0;
+    return PASSED;
   }
-  await report(d.api, run, out);
+  try {
+    await report(d.api, run, out);
+  } catch (error) {
+    out(`Failed (${printable(run.conclusion)}): ${printable(run.html_url)}`);
+    out(`  could not read which tests failed: ${firstLine(error)}`);
+  }
 
-  return 1;
+  return FAILED;
 };

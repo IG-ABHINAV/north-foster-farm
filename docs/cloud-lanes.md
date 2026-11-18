@@ -133,10 +133,18 @@ Push the branch, then run `bin/nff e2e` in its worktree. It diffs the
 branch against `origin/next` (`--base=<ref>` for another), looks each
 changed path up in `e2e/dispatch.json`, prints the specs and pages it
 chose and the path behind each, dispatches `e2e.yml` with those specs
-and pages, waits (one look every 3 minutes) and exits 0 on a pass. On a failure
-it prints the run's link and one line per failing test: file, line,
-name, the site page when the name carries one, and the Playwright
-projects it failed on. Nothing about passing tests. `--dry-run` stops
+and pages, waits (one look every 3 minutes) and exits 0 on a pass. On
+a failure it exits 1 and prints the run's link and one line per
+failing test: file, line, name, the site page when the name carries
+one, and the Playwright projects it failed on. Nothing about passing
+tests. It exits 2 when it dispatched nothing, and 3 when it has no
+verdict: GitHub failed to answer `LOOK_TRIES` looks in a row (a look
+that answers resets the count, and each retry prints one line), or
+the run was still going after 4 hours. Then it says so and prints the
+run's link (2026-11-18, #623: a 404 mid-run, or a log holding escape
+sequences that `gh api` refused, ended it with exit 1 and no verdict;
+it now passes `--allow-escape-sequences` and prints only through
+`printable()`). `--dry-run` stops
 after the choice. Specs (`e2e/...`) or pages (`/...`) named on the
 command line skip the table, and `--all` takes every spec the table
 names, still as named specs. It never sends an empty `specs`, which

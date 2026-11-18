@@ -17,9 +17,16 @@ test("the pressed Card button shows a focus ring", async ({ page }) => {
   // load (Square's SDK does on staging), so wait them out first.
   await expect(page.locator("#pay-card-panel"))
     .not.toHaveAttribute("data-load", /./, { timeout: 30_000 });
+  // The click also sends the focus to the card number. Square's iframe
+  // takes it late, by message, so wait for it to land before moving it
+  // back: landing after the Shift press below, it took the key from
+  // the page and the button's focus was not keyboard focus.
+  await expect.poll(() => page.evaluate(() =>
+    !!document.activeElement?.closest("[data-card]")),
+  { message: "the click moves the focus into the card fields",
+    timeout: 15_000 }).toBe(true);
   // A key press, so the focus that follows is keyboard focus. It goes
-  // to whatever has the focus, and Square's iframe may have taken it
-  // from the page: the button holds it for the press.
+  // to whatever has the focus: the button holds it for the press.
   await card.focus();
   await page.keyboard.press("Shift");
   await card.blur();

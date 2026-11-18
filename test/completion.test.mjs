@@ -128,7 +128,7 @@ describe("the completion scripts", () => {
 
     for (const m of USAGE.matchAll(/^ {2}bin\/nff (?:--\S+ )*(.*)$/gm)) {
       const left = m[1].split(/\s{2,}/)[0];
-      const words = left.match(/^[a-z][a-z|-]*(?: [a-z][a-z|-]*)*/);
+      const words = left.match(/^[a-z][a-z0-9|-]*(?: [a-z][a-z0-9|-]*)*/);
 
       if (!words) continue;
 
@@ -143,7 +143,8 @@ describe("the completion scripts", () => {
   const headFlags = () => [...USAGE.matchAll(/^ {2}bin\/nff (.*)$/gm)]
     .map((m) => {
       const left = m[1].split(/\s{2,}/)[0];
-      const words = left.match(/^(?:--\S+ )*[a-z][a-z|-]*(?: [a-z][a-z|-]*)*/);
+      const words = left
+        .match(/^(?:--\S+ )*[a-z][a-z0-9|-]*(?: [a-z][a-z0-9|-]*)*/);
 
       return {
         words: (words ? words[0] : "").replace(/^(?:--\S+ )+/, ""),

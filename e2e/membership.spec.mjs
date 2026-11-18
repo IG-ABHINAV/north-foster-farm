@@ -1,7 +1,8 @@
 // The Membership tab for a member of one group who hosts another
 // (#495, QA item 4; James, 6458200999), and what the tab says and
-// links to since its rebuild (#602, #600). Each #602 and #600 check
-// proves a row of the test agent's criteria table; the layout is
+// links to since its rebuild (#602, #600) and James's changes to it
+// (#608). Each check proves a row of the test agent's criteria
+// table, or a line of #608's "Done when"; the layout is
 // measured in membership-layout.spec.mjs. The account's endpoints are
 // canned (support/membership.mjs), so this runs on a local build, and
 // nothing is saved anywhere.
@@ -133,30 +134,107 @@ test.describe("the rebuilt Membership tab (#602)", () => {
     ]);
   });
 
-  // Criteria 17 and 18.
-  test("puts the order button on the open round alone", async ({ page }) => {
-    await page.goto("/account/#membership");
+  // #608, Done when 4 (supersedes #602's criteria 17 and 18, the
+  // "Order now" button): the open round's "Open" pill is the order
+  // link, named for where it goes, reached by Tab and drawn with a
+  // focus ring; no "Order now" button; the Next and Closed pills are
+  // not links. With every kind of round on the tab.
+  test("makes the Open pill the order link, with no Order now button",
+    async ({ page }) => {
+      await page.route("**/api/membership", (route) => route.fulfill({
+        json: { ...VIEW, member: { ...VIEW.member, rounds: CLOSED_ROUNDS } },
+      }));
+      await page.goto("/account/#membership");
 
-    const { own } = groups(page);
-    const order = own.getByRole("link", { name: "Order now" });
+      const { own } = groups(page);
+      const tab = page.locator("#acct-membership");
 
-    await expect(order).toHaveCount(1);
-    await expect(order).toBeVisible();
-    await expect(own.locator("[data-mem-round='open']")
-      .getByRole("link", { name: "Order now" })).toHaveCount(1);
-    for (const role of ["link", "button"]) {
-      await expect(own.locator("[data-mem-round='next']").getByRole(role))
+      await expect(own.locator("[data-mem-round]")).toHaveCount(3);
+
+      // No "Order now" button, as a link or a button, anywhere, and
+      // nothing drawn as a button in the open round. (The pill's own
+      // name may say "order now" after "Open": the draft is "Open,
+      // order now".)
+      for (const role of ["link", "button"]) {
+        await expect(tab.getByRole(role, { name: /^\s*order now\s*$/i }))
+          .toHaveCount(0);
+      }
+      await expect(own.locator("[data-mem-round='open'] .btn"))
         .toHaveCount(0);
-    }
-  });
 
-  // Criterion 19: the order page, with the account's own group asked
-  // for (the page then brings its pickup and prices, as the group's
-  // link does). The answer is canned as a miss: what /api/group
-  // gives is test/group-membership.test.mjs's to check.
-  test("takes a member to the order page with the group applied", async ({
-    page,
-  }) => {
+      // The Open pill is one link to the order page, its name saying
+      // where it goes.
+      const open = own.locator("[data-mem-round='open']");
+      const pill = open.getByRole("link");
+
+      await expect(pill).toHaveCount(1);
+      await expect(pill).toBeVisible();
+      await expect(pill).toContainText("Open");
+      await expect(pill).toHaveAccessibleName(/^Open\b.*\border\b/i);
+      await expect(pill).toHaveAttribute("href", /\/order\/(\?[^#]*)?(#.*)?$/);
+      // It is the pill itself, not a link beside it: the pill's word
+      // sits inside the link.
+      expect(await pill.evaluate((a) => !!a.querySelector(
+        ".account-round-pill") || a.matches(".account-round-pill")))
+        .toBe(true);
+
+      // Next and Closed: their pills are not links, and nothing in
+      // those rounds is.
+      for (const state of ["next", "closed"]) {
+        const round = own.locator(`[data-mem-round='${state}']`);
+
+        await expect(round).toBeVisible();
+        for (const role of ["link", "button"]) {
+          await expect(round.getByRole(role), state).toHaveCount(0);
+        }
+        expect(await round.locator(".account-round-pill")
+          .evaluate((el) => !!el.closest("a")), state).toBe(false);
+      }
+
+      // Reached by Tab, from the top of the page.
+      const unfocused = await pill.evaluate((a) => {
+        const s = getComputedStyle(a);
+
+        return { outline: s.outlineStyle, shadow: s.boxShadow };
+      });
+      let reached = false;
+
+      await page.locator("body").focus();
+      for (let i = 0; i < 120 && !reached; i += 1) {
+        await page.keyboard.press("Tab");
+        reached = await pill.evaluate((a) => document.activeElement === a);
+      }
+      expect(reached, "reached by Tab").toBe(true);
+
+      // A visible focus ring: an outline or a ring drawn as a shadow,
+      // which the link does not have before it takes focus.
+      const ring = await pill.evaluate((a) => {
+        const s = getComputedStyle(a);
+        const transparent = (c) => /rgba\([^)]*,\s*0\)$/.test(c)
+          || c === "transparent";
+
+        return {
+          focusVisible: a.matches(":focus-visible"),
+          outline: s.outlineStyle !== "none"
+            && parseFloat(s.outlineWidth) > 0
+            && !transparent(s.outlineColor),
+          shadow: s.boxShadow,
+        };
+      });
+
+      expect(ring.focusVisible).toBe(true);
+      expect(ring.outline || (ring.shadow !== "none"
+        && ring.shadow !== unfocused.shadow), "a focus ring").toBe(true);
+    });
+
+  // #608, Done when 6 (supersedes #602's criterion 19 test, which
+  // followed the button): following the Open pill reaches the order
+  // page, with the account's own group asked for (the page then brings
+  // its pickup and prices, as the group's link does). The answer is
+  // canned as a miss: what /api/group gives is
+  // test/group-membership.test.mjs's to check.
+  test("takes a member from the Open pill to the order page with the group "
+    + "applied", async ({ page }) => {
     const asked = [];
 
     await page.route("**/api/group", (route) => {
@@ -171,7 +249,7 @@ test.describe("the rebuilt Membership tab (#602)", () => {
 
     const { own } = groups(page);
 
-    await own.getByRole("link", { name: "Order now" }).click();
+    await own.locator("[data-mem-round='open']").getByRole("link").click();
     await expect(page).toHaveURL(/\/order\/(\?[^#]*)?(#.*)?$/);
     await expect.poll(() => asked.length).toBeGreaterThan(0);
     // The account's group, or the group's own code: either applies it.
@@ -195,25 +273,108 @@ test.describe("the rebuilt Membership tab (#602)", () => {
     await expect(own.locator("dt:visible")).toHaveCount(0);
   });
 
-  // Criteria 23, 24 and 26 to 29: the member's own code, coming soon.
+  // #608, Done when 5, the paragraph (supersedes #602's criterion 24,
+  // James's earlier paragraph): the first sentence alone, as an
+  // ordinary paragraph, no longer opened by "Coming soon:".
+  test("opens the Membership QR code with James's sentence as a paragraph",
+    async ({ page }) => {
+      await page.goto("/account/#membership");
+
+      const code = groups(page).own.getByRole("region",
+        { name: "Membership QR code" });
+      const first = "Scan your code when you make a purchase in person "
+        + "(like at a farmers market), and your membership benefits "
+        + "will apply automatically.";
+      const said = code.locator("p", { hasText: "Scan your code" });
+
+      await expect(code).toBeVisible();
+      await expect(said).toHaveCount(1);
+      await expect(said).toBeVisible();
+      await expect(said).toHaveText(first);
+      // Ordinary: not the note, nor inside it.
+      expect(await said.evaluate((p) => !p.closest(".zip-note, .alert")))
+        .toBe(true);
+      await expect(code).not.toContainText("Coming soon:");
+    });
+
+  // #608, Done when 5, the note (supersedes #602's criterion 24 check
+  // that the second sentence is bold in the paragraph): after the
+  // paragraph, a note in the order countdown's style, the shared
+  // .zip-note with its bar down the left in the primary color, bold
+  // as the countdown is, reading exactly James's sentence (with the
+  // coordinator's "a"). James, by screenshot on #608: not Bootstrap's
+  // alert.
+  test("puts the meantime sentence in a countdown-style note after it",
+    async ({ page }) => {
+      await page.goto("/account/#membership");
+
+      const code = groups(page).own.getByRole("region",
+        { name: "Membership QR code" });
+      const second = "In the meantime, let us know that you're a member at "
+        + "checkout, and we'll look up your membership by name or email.";
+      const note = code.locator(".zip-note");
+
+      await expect(note).toHaveCount(1);
+      await expect(note).toBeVisible();
+      await expect(note).toHaveText(second);
+
+      const m = await note.evaluate((el) => {
+        const s = getComputedStyle(el);
+        // A custom property resolved to the color the page draws.
+        const resolve = (prop, value) => {
+          const probe = document.createElement("span");
+
+          probe.style[prop] = value;
+          el.parentElement.append(probe);
+
+          const c = getComputedStyle(probe)[prop];
+
+          probe.remove();
+
+          return c;
+        };
+        const p = Array.from(el.closest("section").querySelectorAll("p"))
+          .find((x) => x.textContent.trim().startsWith("Scan your code"));
+        const width = (side) => parseFloat(s[`border${side}Width`]);
+
+        return {
+          bar: s.borderLeftStyle !== "none" && width("Left") > 0,
+          barWidest: ["Top", "Right", "Bottom"]
+            .every((side) => width("Left") > width(side)),
+          barColor: s.borderLeftColor,
+          primary: resolve("color", "var(--bs-primary)"),
+          ground: s.backgroundColor,
+          subtle: resolve("backgroundColor", "var(--bs-primary-bg-subtle)"),
+          weight: Number(s.fontWeight),
+          alert: el.matches(".alert, .alert *"),
+          follows: !!p && !!(p.compareDocumentPosition(el)
+            & Node.DOCUMENT_POSITION_FOLLOWING),
+          below: !!p && el.getBoundingClientRect().top
+            >= p.getBoundingClientRect().bottom - 0.5,
+        };
+      });
+
+      expect(m.bar, "a bar down its left").toBe(true);
+      expect(m.barWidest, "the left bar wider than its other edges")
+        .toBe(true);
+      expect(m.barColor, "the bar in the primary color").toBe(m.primary);
+      expect(m.ground, "the shared note's pale ground").toBe(m.subtle);
+      expect(m.weight, "bold, as the countdown").toBeGreaterThanOrEqual(700);
+      expect(m.alert, "not Bootstrap's alert").toBe(false);
+      // After the paragraph, in the page's order and drawn below it.
+      expect(m.follows, "after the paragraph").toBe(true);
+      expect(m.below, "drawn below the paragraph").toBe(true);
+    });
+
+  // Criteria 23 and 26 to 29: the member's own code, coming soon. (Its
+  // paragraph, criterion 24, is #608's two tests above.)
   test("shows the Membership QR code as coming soon", async ({ page }) => {
     await page.goto("/account/#membership");
 
     const { own } = groups(page);
     const code = own.getByRole("region", { name: "Membership QR code" });
-    const first = "Coming soon: scan your code when you make a purchase in "
-      + "person (like at a farmers market), and your membership benefits "
-      + "will apply automatically.";
-    const second = "In the meantime, let us know you are a member at "
-      + "checkout, and we'll look up your membership by name or email.";
 
     await expect(code).toBeVisible();
-    await expect(code.locator("p", { hasText: "Coming soon: scan" }))
-      .toHaveText(`${first} ${second}`);
-    // Bold, and nothing else is: the build may split the bold run
-    // where it keeps the last two words together (build:orphans).
-    expect((await code.locator("strong").allTextContents()).join("")
-      .replace(/\s+/g, " ").trim()).toBe(second);
 
     const img = code.getByRole("img");
 
@@ -299,7 +460,8 @@ test("keeps the closed pickup first, until it has happened", async ({
   for (const role of ["link", "button"]) {
     await expect(rounds.nth(0).getByRole(role)).toHaveCount(0);
   }
-  await expect(rounds.nth(1).getByRole("link", { name: "Order now" }))
+  // The open round takes orders through its pill (#608).
+  await expect(rounds.nth(1).getByRole("link", { name: /^Open\b/ }))
     .toBeVisible();
   // Where: the group's address, above its rounds.
   await expect(own.locator("[data-mem='address']")).toContainText("1 Main St");

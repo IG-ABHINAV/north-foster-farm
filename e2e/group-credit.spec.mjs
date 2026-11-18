@@ -44,13 +44,13 @@ test.describe("a member's credit (#471)", () => {
       await page.goto((await op("login", { email })).url);
       await expect(page.locator("#account-app")).toBeVisible();
 
-      // The head's right: the group and the balance.
-      const member = page.locator("#account-member");
+      // The head: the balance on the Sign out line, and no group's
+      // name (#608).
+      const head = page.locator("#account-app .account-head");
 
-      await expect(member).toBeVisible();
-      await expect(member.locator("[data-member-group]")).toHaveText(GYM);
-      await expect(member.locator("[data-member-credit]"))
-        .toHaveText("Credit: $100");
+      await expect(head.getByText("Credit: $100", { exact: true }))
+        .toBeVisible();
+      await expect(head).not.toContainText(GYM, { useInnerText: true });
 
       const order = new OrderPage(page);
 
@@ -91,7 +91,7 @@ test.describe("a member's credit (#471)", () => {
 
       // The balance on the account page follows.
       await page.goto("/account/");
-      await expect(member.locator("[data-member-credit]"))
-        .toHaveText("Credit: $45");
+      await expect(head.getByText("Credit: $45", { exact: true }))
+        .toBeVisible();
     });
 });

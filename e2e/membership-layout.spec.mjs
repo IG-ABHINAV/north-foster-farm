@@ -7,8 +7,9 @@
 // and 320 px. Canned, so nothing is saved.
 
 import { expect, test } from "./support/order.mjs";
+import { CUSTOMER } from "./support/canned.mjs";
 import {
-  CLOSED_ROUNDS, MEMBER_GROUP, ME, VIEW, groups, signIn,
+  CLOSED_ROUNDS, HOSTED_GROUP, MEMBER_GROUP, ME, VIEW, groups, signIn,
 } from "./support/membership.mjs";
 
 // The widths each project measures: null is the project's own.
@@ -396,116 +397,436 @@ test.describe("the group on the Membership tab (#602)", () => {
   });
 });
 
-// #601, criteria 36 to 38: at 390 px and below the head is one column,
-// the avatar and the email address on top, the group's name and the
-// credit as their own row under them, and the address keeps 60% of
-// the head at least, on one line.
-test.describe("the account head of a long-named group's member (#601)",
-  () => {
-    for (const width of [390, 320, null]) {
-      test(`stacks in one column at ${label(width)}`, async ({
-        page, context, baseURL,
-      }, info) => {
-        test.skip(!phoneWidthsFor(info.project.name).includes(width),
-          "another project's width");
-        await atWidth(page, width);
-        await signIn(page, context, baseURL, {
-          me: { ...ME, customer: { ...ME.customer,
-            email: "member@example.com" } },
-        });
-        await page.goto("/account/#membership");
+// The section headings' gaps at e146cd21, from its CSS
+// (_account.scss): 1.5rem (--account-gap) above each, the margin-top
+// of `.account-membership-group .account-group`, and 1.5rem below,
+// the margin-bottom of `.account-group-head`. In rem, so the root's
+// size turns them to pixels.
+const OLD_ABOVE_REM = 1.5;
+const OLD_BELOW_REM = 1.5;
 
-        await expect(page.locator("#account-email"))
-          .toHaveText("member@example.com");
-        await expect(page.locator("#account-member"))
-          .toContainText(MEMBER_GROUP);
-        await expect(page.locator("#account-member"))
-          .toContainText("Credit");
+// Each section heading of both groups, measured: above, from the
+// lowest thing drawn before its section to the heading's top; below,
+// from the heading's bottom to the highest thing drawn after it in
+// its section. A row's pulled-up edge (Bootstrap's negative gutter
+// margin) is not drawn, so what is measured below is its columns.
+const headingGaps = (page) => page.locator("#mem-groups").evaluate(
+  (root) => {
+    const shown = (el) => el.getClientRects().length > 0
+      && getComputedStyle(el).visibility !== "hidden";
+    const lowest = (el) => Math.max(el.getBoundingClientRect().bottom,
+      ...Array.from(el.querySelectorAll("*")).filter(shown)
+        .map((d) => d.getBoundingClientRect().bottom));
+    const before = (el) => {
+      for (let n = el; n && n !== root; n = n.parentElement) {
+        for (let s = n.previousElementSibling; s;
+          s = s.previousElementSibling) {
+          if (shown(s)) return s;
+        }
+      }
 
-        const m = await page.locator("#account-app .account-head").evaluate(
-          (head) => {
-            const box = (el) => el.getBoundingClientRect();
-            const email = head.querySelector("#account-email");
-            const avatar = head.querySelector("#account-avatar");
-            const group = head.querySelector("[data-member-group]");
-            const credit = head.querySelector("[data-member-credit]");
-            const top = Math.max(box(email).bottom, box(avatar).bottom);
+      return null;
+    };
+    const highestAfter = (h, section) => {
+      const tops = Array.from(section.querySelectorAll("*"))
+        .filter((el) => shown(el) && !el.contains(h)
+          && (h.compareDocumentPosition(el)
+            & Node.DOCUMENT_POSITION_FOLLOWING)
+          && !h.contains(el)
+          && parseFloat(getComputedStyle(el).marginTop) >= 0)
+        .map((el) => el.getBoundingClientRect().top);
 
-            return {
-              share: box(email).width / box(head).width,
-              emailLines: Math.round(box(email).height
-                / parseFloat(getComputedStyle(email).lineHeight)),
-              groupUnder: box(group).top >= top - 0.5,
-              creditUnder: box(credit).top >= top - 0.5,
-              inside: Math.max(box(group).right, box(credit).right)
-                <= box(head).right + 0.5,
-            };
-          }
-        );
+      return Math.min(...tops);
+    };
 
-        expect(m.share).toBeGreaterThanOrEqual(0.6);
-        expect(m.emailLines).toBe(1);
-        expect(m.groupUnder).toBe(true);
-        expect(m.creditUnder).toBe(true);
-        expect(m.inside).toBe(true);
+    return Array.from(root.querySelectorAll("[data-mem-group] h3"))
+      .filter(shown)
+      .map((h) => {
+        const section = h.closest("section");
+        const r = h.getBoundingClientRect();
+
+        return {
+          heading: h.textContent.trim(),
+          above: r.top - lowest(before(section)),
+          below: highestAfter(h, section) - r.bottom,
+        };
       });
+  }
+);
+
+test.describe("the Membership tab's section headings (#608)", () => {
+  // Done when 3: each section heading (Pickups, Membership QR code,
+  // Leave the group; Pickups, Invite members, Members) has more space
+  // above it than below it, and more above and less below than at
+  // e146cd21. The step is one of the page's scale; the test holds the
+  // direction, and the report says the values.
+  test("gives each section heading more room above and less below", async ({
+    page, context, baseURL,
+  }) => {
+    await open(page, context, baseURL);
+
+    const root = await page.evaluate(() => parseFloat(
+      getComputedStyle(document.documentElement).fontSize));
+    const oldAbove = OLD_ABOVE_REM * root;
+    const oldBelow = OLD_BELOW_REM * root;
+    const gaps = await headingGaps(page);
+
+    // The Members heading carries its count, "Members (1)".
+    expect(gaps.map((g) => g.heading.replace(/\s*\(\d+\)$/, ""))).toEqual([
+      "Pickups",
+      "Membership QR code", "Leave the group", "Pickups", "Invite members",
+      "Members"]);
+    for (const g of gaps) {
+      const at = `${g.heading}: ${g.above} px above, ${g.below} px below`;
+
+      expect(g.above, at).toBeGreaterThan(g.below);
+      expect(g.above, `${at}, more above than ${oldAbove}`)
+        .toBeGreaterThan(oldAbove + 0.5);
+      expect(g.below, `${at}, less below than ${oldBelow}`)
+        .toBeLessThan(oldBelow - 0.5);
+      expect(g.below, `${at}, not flush`).toBeGreaterThan(0);
+    }
+  });
+
+  // Spec 4's last line (the coordinator's reading, not a "Done when"
+  // line): with the Order now button gone, the host's Download QR code
+  // button is filled again, as before #602.
+  test("fills the host's Download QR code button", async ({
+    page, context, baseURL,
+  }) => {
+    await open(page, context, baseURL);
+
+    const button = groups(page).hosted.getByRole("link",
+      { name: "Download QR code" });
+
+    await expect(button).toBeVisible();
+
+    const m = await button.evaluate((a) => {
+      const s = getComputedStyle(a);
+      const probe = document.createElement("span");
+
+      probe.style.backgroundColor = "var(--bs-primary)";
+      a.parentElement.append(probe);
+
+      const primary = getComputedStyle(probe).backgroundColor;
+
+      probe.remove();
+
+      return { ground: s.backgroundColor, primary };
+    });
+
+    expect(m.ground).toBe(m.primary);
+  });
+});
+
+// The accounts #608's head criteria name: a member with credit (who
+// also hosts a group), a host who is in no group and has no credit,
+// and an account in no group at all.
+const HOST_ONLY = {
+  me: { signedIn: true, membership: true, customer: CUSTOMER,
+    member: null, credit: 0 },
+  view: { member: null, hosts: VIEW.hosts },
+};
+const NO_GROUP = {
+  me: { signedIn: true, membership: false, customer: CUSTOMER,
+    member: null, credit: 0 },
+};
+
+// The widths #608 names for the head; phone and iphone measure their
+// own width and 320 px.
+const headWidthsFor = (project, page) => (project === "desktop"
+  ? [320, 390, 768, 1280] : [page.viewportSize().width, 320]);
+
+const openAccount = async (page, context, baseURL, options) => {
+  await signIn(page, context, baseURL, options);
+  await page.goto("/account/");
+  await expect(page.locator("#account-email")).toBeVisible();
+};
+
+// The head's Sign out line, measured: Sign out, the credit (the text
+// "Credit: $N", wherever it sits), and any dot or bullet drawn between
+// them, as text or as a ::before or ::after.
+const signOutLine = (page) => page.locator("#account-app .account-head")
+  .evaluate((head) => {
+    const DOT = /[·•∙⋅]/;
+    const box = (el) => el.getBoundingClientRect().toJSON();
+    const email = head.querySelector("#account-email");
+    const signout = head.querySelector("#account-signout");
+    const shown = (el) => el.getClientRects().length > 0
+      && getComputedStyle(el).visibility !== "hidden";
+    const texts = [];
+    const walk = document.createTreeWalker(head, NodeFilter.SHOW_TEXT);
+
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (!email.contains(n) && shown(n.parentElement)) texts.push(n);
     }
 
-    // Criterion 37a (coordinator, 2026-11-18, from #601): an address
-    // too long for one line breaks only before the @ or before a dot,
-    // never inside a word, and stays inside the head.
-    const LONG = ["first.last@example.co.uk",
-      "jonathan.appleseed@farmmail.com"];
+    const creditNode = texts.find((n) => /Credit:/.test(n.data));
+    let credit = null;
 
-    for (const width of [320, 360, 390]) {
-      for (const email of LONG) {
-        test(`breaks a ${email.length}-character address only before `
-          + `the @ or a dot at ${width} px`, async ({
-          page, context, baseURL,
-        }) => {
-          await atWidth(page, width);
-          await signIn(page, context, baseURL, {
-            me: { ...ME, customer: { ...ME.customer, email } },
-          });
-          await page.goto("/account/#membership");
-          await expect(page.locator("#account-email")).toHaveText(email);
+    if (creditNode) {
+      const range = document.createRange();
 
-          const m = await page.locator("#account-app .account-head")
-            .evaluate((head) => {
-              const el = head.querySelector("#account-email");
-              const walk = document.createTreeWalker(el,
-                NodeFilter.SHOW_TEXT);
-              const chars = [];
+      range.selectNodeContents(creditNode);
 
-              for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-                for (let i = 0; i < n.data.length; i += 1) {
-                  const range = document.createRange();
+      const el = creditNode.parentElement;
+      const tops = new Set(Array.from(range.getClientRects(),
+        (r) => Math.round(r.top)));
 
-                  range.setStart(n, i);
-                  range.setEnd(n, i + 1);
+      const text = el.textContent.replace(/\s+/g, " ");
 
-                  const r = range.getBoundingClientRect();
+      credit = {
+        text: text.slice(text.indexOf("Credit:")).trim(),
+        rect: range.getBoundingClientRect().toJSON(),
+        lines: tops.size,
+        size: parseFloat(getComputedStyle(el).fontSize),
+      };
+    }
 
-                  if (r.width > 0) {
-                    chars.push({ c: n.data[i], top: r.top, right: r.right });
-                  }
-                }
-              }
+    // Dots as text, each with its box and style.
+    const dots = [];
 
-              // The character that starts each line after the first.
-              const starts = chars.filter((ch, i) => i > 0
-                && ch.top > chars[i - 1].top + 2).map((ch) => ch.c);
+    for (const n of texts) {
+      for (let i = 0; i < n.data.length; i += 1) {
+        if (DOT.test(n.data[i])) {
+          const range = document.createRange();
 
-              return {
-                starts,
-                inside: Math.max(...chars.map((ch) => ch.right))
-                  <= head.getBoundingClientRect().right + 0.5,
-              };
-            });
+          range.setStart(n, i);
+          range.setEnd(n, i + 1);
 
-          for (const c of m.starts) expect(["@", "."]).toContain(c);
-          expect(m.inside).toBe(true);
-        });
+          const s = getComputedStyle(n.parentElement);
+
+          dots.push({ rect: range.getBoundingClientRect().toJSON(),
+            size: parseFloat(s.fontSize), color: s.color });
+        }
+      }
+    }
+    // Dots drawn as generated content, outside the address.
+    for (const el of head.querySelectorAll("*")) {
+      if (!email.contains(el) && !el.contains(email) && shown(el)) {
+        for (const p of ["::before", "::after"]) {
+          const s = getComputedStyle(el, p);
+
+          if (s.content !== "none" && DOT.test(s.content)
+            && s.display !== "none") {
+            dots.push({ rect: null, size: parseFloat(s.fontSize),
+              color: s.color });
+          }
+        }
+      }
+    }
+
+    return {
+      email: box(email),
+      signout: shown(signout) ? box(signout) : null,
+      credit,
+      dots,
+      root: parseFloat(getComputedStyle(document.documentElement).fontSize),
+    };
+  });
+
+const signOut = (page) => page.locator("#account-app .account-head")
+  .getByRole("button", { name: "Sign out", exact: true });
+
+// A color with no hue to speak of, lighter than the text: a gray.
+const gray = (color) => {
+  const [r, g, b] = color.match(/[\d.]+/g).map(Number);
+
+  return Math.max(r, g, b) - Math.min(r, g, b) <= 24
+    && Math.min(r, g, b) >= 64;
+};
+
+test.describe("the account head (#608)", () => {
+  // Done when 1: no group's name in the head, at 320, 390, 768 and
+  // 1280 px, for a member (who also hosts) and for a host.
+  test("shows no group name in the head, for a member and a host", async ({
+    page, context, baseURL,
+  }, info) => {
+    const widths = headWidthsFor(info.project.name, page);
+
+    for (const [who, options] of [["member", {}], ["host", HOST_ONLY]]) {
+      await openAccount(page, context, baseURL, options);
+      // The account is the one meant: its groups are on the tab.
+      await page.goto("/account/#membership");
+      await expect(page.locator("#mem-groups [data-mem-group]").first())
+        .toBeVisible();
+
+      const head = page.locator("#account-app .account-head");
+
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: 800 });
+        for (const name of [MEMBER_GROUP, HOSTED_GROUP]) {
+          await expect(head, `${who} at ${width} px: ${name}`)
+            .not.toContainText(name, { useInnerText: true });
+        }
       }
     }
   });
+
+  // Done when 2: "Sign out", the separator, then "Credit: $N", on one
+  // line under the email address, the separator at the credit's small
+  // gray size (0.875rem, the credit's size today); an account with no
+  // credit line shows Sign out alone, with no separator. At #608's
+  // widths.
+  test("puts the credit on the Sign out line after a separator, or Sign out "
+    + "alone", async ({ page, context, baseURL }, info) => {
+    const widths = headWidthsFor(info.project.name, page);
+
+    await openAccount(page, context, baseURL);
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 800 });
+
+      const m = await signOutLine(page);
+      const at = `member at ${width} px`;
+
+      await expect(signOut(page), at).toBeVisible();
+      expect(m.signout, `${at}: Sign out shown`).not.toBeNull();
+      expect(m.credit, `${at}: the credit shown`).not.toBeNull();
+      expect(m.credit.text, at).toMatch(/^Credit: \$\d[\d,]*(\.\d\d)?$/);
+      expect(m.credit.lines, `${at}: the credit whole`).toBe(1);
+      // Under the address, on one line with Sign out, after it.
+      expect(m.signout.top, at).toBeGreaterThanOrEqual(m.email.bottom - 0.5);
+      expect(m.credit.rect.top, at)
+        .toBeGreaterThanOrEqual(m.email.bottom - 0.5);
+      expect(Math.abs((m.signout.top + m.signout.bottom) / 2
+        - (m.credit.rect.top + m.credit.rect.bottom) / 2),
+      `${at}: one line`).toBeLessThan(4);
+      expect(m.credit.rect.left, at).toBeGreaterThan(m.signout.right);
+      // One separator, between them, small and gray as the credit is.
+      expect(m.dots, `${at}: one separator`).toHaveLength(1);
+
+      const [dot] = m.dots;
+
+      if (dot.rect) {
+        expect(dot.rect.left, at).toBeGreaterThanOrEqual(m.signout.right
+          - 0.5);
+        expect(dot.rect.right, at).toBeLessThanOrEqual(m.credit.rect.left
+          + 0.5);
+      }
+      expect(m.credit.size, `${at}: the credit's size`).toBe(0.875 * m.root);
+      expect(dot.size, `${at}: the separator's size`).toBe(m.credit.size);
+      expect(gray(dot.color), `${at}: a gray separator (${dot.color})`)
+        .toBe(true);
+    }
+
+    for (const [who, options] of [["host", HOST_ONLY],
+      ["no group", NO_GROUP]]) {
+      await openAccount(page, context, baseURL, options);
+      for (const width of widths) {
+        await page.setViewportSize({ width, height: 800 });
+
+        const m = await signOutLine(page);
+        const at = `${who} at ${width} px`;
+
+        await expect(signOut(page), at).toBeVisible();
+        expect(m.signout, `${at}: Sign out shown`).not.toBeNull();
+        expect(m.credit, `${at}: no credit line`).toBeNull();
+        expect(m.dots, `${at}: no separator`).toEqual([]);
+      }
+    }
+  });
+});
+
+// #601, criterion 37 (kept by #608): a short address keeps a readable
+// width, on one line, inside the head. #608 took the group's name out
+// of the head, so #601's criteria 36 and 38 (the head in one column,
+// the group's name and credit as a row under the address) are gone
+// with it.
+test.describe("the account head's email address (#601)", () => {
+  for (const width of [390, 320, null]) {
+    test(`keeps a short address on one line at ${label(width)}`, async ({
+      page, context, baseURL,
+    }, info) => {
+      test.skip(!phoneWidthsFor(info.project.name).includes(width),
+        "another project's width");
+      await atWidth(page, width);
+      await signIn(page, context, baseURL, {
+        me: { ...ME, customer: { ...ME.customer,
+          email: "member@example.com" } },
+      });
+      await page.goto("/account/#membership");
+
+      await expect(page.locator("#account-email"))
+        .toHaveText("member@example.com");
+
+      const m = await page.locator("#account-app .account-head").evaluate(
+        (head) => {
+          const box = (el) => el.getBoundingClientRect();
+          const email = head.querySelector("#account-email");
+
+          return {
+            share: box(email).width / box(head).width,
+            emailLines: Math.round(box(email).height
+              / parseFloat(getComputedStyle(email).lineHeight)),
+            inside: box(email).right <= box(head).right + 0.5,
+          };
+        }
+      );
+
+      expect(m.share).toBeGreaterThanOrEqual(0.6);
+      expect(m.emailLines).toBe(1);
+      expect(m.inside).toBe(true);
+    });
+  }
+});
+
+test.describe("an address too long for one line (#601)", () => {
+
+  // Criterion 37a (coordinator, 2026-11-18, from #601): an address
+  // too long for one line breaks only before the @ or before a dot,
+  // never inside a word, and stays inside the head.
+  const LONG = ["first.last@example.co.uk",
+    "jonathan.appleseed@farmmail.com"];
+
+  for (const width of [320, 360, 390]) {
+    for (const email of LONG) {
+      test(`breaks a ${email.length}-character address only before `
+          + `the @ or a dot at ${width} px`, async ({
+        page, context, baseURL,
+      }) => {
+        await atWidth(page, width);
+        await signIn(page, context, baseURL, {
+          me: { ...ME, customer: { ...ME.customer, email } },
+        });
+        await page.goto("/account/#membership");
+        await expect(page.locator("#account-email")).toHaveText(email);
+
+        const m = await page.locator("#account-app .account-head")
+          .evaluate((head) => {
+            const el = head.querySelector("#account-email");
+            const walk = document.createTreeWalker(el,
+              NodeFilter.SHOW_TEXT);
+            const chars = [];
+
+            for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+              for (let i = 0; i < n.data.length; i += 1) {
+                const range = document.createRange();
+
+                range.setStart(n, i);
+                range.setEnd(n, i + 1);
+
+                const r = range.getBoundingClientRect();
+
+                if (r.width > 0) {
+                  chars.push({ c: n.data[i], top: r.top, right: r.right });
+                }
+              }
+            }
+
+            // The character that starts each line after the first.
+            const starts = chars.filter((ch, i) => i > 0
+                && ch.top > chars[i - 1].top + 2).map((ch) => ch.c);
+
+            return {
+              starts,
+              inside: Math.max(...chars.map((ch) => ch.right))
+                  <= head.getBoundingClientRect().right + 0.5,
+            };
+          });
+
+        for (const c of m.starts) expect(["@", "."]).toContain(c);
+        expect(m.inside).toBe(true);
+      });
+    }
+  }
+});

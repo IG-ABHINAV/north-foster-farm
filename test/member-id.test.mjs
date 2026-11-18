@@ -987,18 +987,15 @@ describe("the pages", () => {
   const read = (path) => readFile(new URL(`../${path}`, import.meta.url),
     "utf8");
 
-  // #602: the member's section is "Membership QR code", over James's
-  // paragraph word for word, its second sentence bold. What the page
-  // shows and hides is measured in e2e/membership.spec.mjs.
-  it("keep James's paragraph for the Membership QR code", async () => {
+  // #602: the member's section is "Membership QR code". Its words
+  // changed in #608 (a paragraph, then a note in the order countdown's
+  // style); they
+  // are checked in e2e/membership.spec.mjs, with what the page shows
+  // and hides.
+  it("keep the Membership QR code heading", async () => {
     const html = await read("layouts/account/single.html");
 
     assert.match(html, /<h3 [^>]*>Membership QR code<\/h3>/);
-    assert.ok(html.includes("Coming soon: scan your code when you make "
-      + "a purchase in person (like at a farmers market), and your "
-      + "membership benefits will apply automatically. <strong>In the "
-      + "meantime, let us know you are a member at checkout, and we'll "
-      + "look up your membership by name or email.</strong>"));
   });
 
   it("print the tag at 1.25 x 2.5 in, kept out of search", async () => {

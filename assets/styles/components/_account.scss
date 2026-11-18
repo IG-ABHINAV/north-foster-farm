@@ -916,8 +916,48 @@
     }
   }
 
-  .account-round-order {
-    margin-top: 0.75rem;
+  // The open round's pill is the link to the order page (#608). It
+  // reads as one by the site's quiet underline under its word (Sign
+  // out's) and a chevron after it, darkens under the pointer, and
+  // takes the buttons' focus ring. Its ::before gives a finger more
+  // to press than the pill's own height.
+  a.account-round-pill {
+    position: relative;
+    display: inline-flex;
+    gap: 0.125rem;
+    align-items: center;
+    padding-right: 0.375rem;
+    text-decoration: none;
+
+    &::before {
+      position: absolute;
+      inset: -0.625rem -0.25rem;
+      content: "";
+    }
+
+    .account-round-pill-icon {
+      width: 0.875rem;
+      height: 0.875rem;
+    }
+
+    &:hover {
+      background-color: var(--bs-success-border-subtle);
+    }
+
+    &:focus-visible {
+      outline: $input-btn-focus-width solid $input-btn-focus-color;
+      outline-offset: 2px;
+    }
+  }
+
+  .account-round-pill-word {
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, currentcolor 45%, transparent);
+    text-underline-offset: 0.18em;
+
+    a:hover > & {
+      text-decoration-color: currentcolor;
+    }
   }
 
   .account-membership-qr {

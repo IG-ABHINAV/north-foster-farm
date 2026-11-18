@@ -655,20 +655,36 @@ for (const width of WIDTHS) {
       async ({ page }) => {
         const order = new OrderPage(page);
         const toggle = order.cart.locator("[data-cart-toggle]");
+        const checkout = order.cart.locator("[data-checkout]");
 
         await cannedDates(page);
         await order.open(FULL_CART);
-        await page.evaluate(() => scrollTo(0, 0));
 
-        const floats = () => order.cart.evaluate((el) => (
-          el.dataset.placement === "floating"
-        ));
+        test.skip(await order.cart.getAttribute("data-placement") === "column",
+          "the cart doesn't float this wide");
 
-        test.skip(!await floats(), "the cart doesn't float this wide");
+        // At the top, with the cart floating over the catalog (#607).
+        // ?add= scrolls the cart into view smoothly, and focusing its
+        // heading jumps the page there too; on a busy WebKit the smooth
+        // one was still running and took the page back down after our
+        // scroll up. Escape then folded the cart in view of its slot,
+        // where it settled inline and open at once.
+        await order.scrollSettled();
+        await expect.poll(async () => {
+          await page.evaluate(() => scrollTo(0, 0));
+          await order.scrollSettled();
+          return page.evaluate(() => scrollY);
+        }, { message: "the page stays at the top" }).toBe(0);
+        await expect(order.cart).toHaveAttribute("data-placement", "floating");
 
-        // One fold at every width (#477): open it, then Escape.
+        // One fold at every width (#477): open it, then Escape from
+        // inside it. Checkout opens once stock is known (#333); a
+        // disabled one can't take the focus, which then stays on the
+        // heading, outside the cart, and Escape there isn't its.
         await unfoldCart(order);
-        await order.cart.locator("[data-checkout]").focus();
+        await expect(checkout).toBeEnabled();
+        await checkout.focus();
+        await expect(checkout).toBeFocused();
         await page.keyboard.press("Escape");
         await expect.soft(order.cart, "Escape folds it")
           .toHaveAttribute("data-fold", "closed");

@@ -1,3 +1,4 @@
+/* eslint-disable camelcase -- GitHub names its fields its way */
 // The criteria tests for `bin/nff hotfix start` and `bin/nff hotfix
 // finish` (#612), one per acceptance criterion and named for it,
 // written from the criteria before the commands existed. The
@@ -18,7 +19,8 @@
 //     hotfixCommand(action, rest, { flags, out }, deps) -> Promise
 //   as promote.mjs's promoteCommand does: `action` is "start" or
 //   "finish", `rest` the words after it, `flags` bin/nff's
-//   (`dry-run`), `out(line)` prints. bin/nff routes `hotfix` to it.
+//   (`dry-run`, `yes`), `out(line)` prints. bin/nff routes `hotfix`
+//   to it.
 //   A refusal throws an Error whose message starts "Refused:" and
 //   changes nothing. A stop on a conflict throws too.
 // - The placeholders are branches on origin: `hotfix/next` at the
@@ -34,11 +36,31 @@
 //                 runs goes through it, the fetch and every push
 //                 included, against the remote named `origin`.
 //     api(path, { method = "GET", body })
-//                 GitHub's REST API, parsed JSON. The force-push
-//                 exception, however it is granted, goes through it.
+//                 GitHub's REST API, parsed JSON: here only GET and PUT
+//                 of repos/north-foster-farm/north-foster-farm/
+//                 rulesets/25361439.
 //     confirm(question) -> Promise<boolean>
-//                 only if James asks for a confirmation (question 2
-//                 below); these tests answer yes.
+//                 asks the person running the command.
+// - The force-push exception (coordinator, 2026-11-18, #612). Both
+//   commands push `next` and `staging` to commits that are not fast-
+//   forwards (`start` moves them back to `main`), so each opens the
+//   same window: it saves ruleset 25361439, narrows it to `main` only
+//   (`conditions.ref_name.include` is exactly ["refs/heads/main"]) by
+//   a PUT before its first push to `next` or `staging`, restores the
+//   saved copy by a PUT after its last, in a finally so a failed push
+//   restores it too, then reads it back and compares it with the
+//   saved copy. A mismatch is an Error naming the ruleset, never a
+//   success. No write ever drops `main`, the `non_fast_forward` or
+//   `deletion` rule, or adds a bypass actor. `--dry-run` writes
+//   nothing to GitHub.
+// - The "linear history" ruleset (25898866) covers `next`, `staging`
+//   and `main`, and is never relaxed: the placeholders rebased onto a
+//   linear `main` hold no merge commit. Were a rebuilt branch to hold
+//   one, `finish` refuses rather than relax that ruleset.
+// - `start` asks before it changes anything, through deps.confirm,
+//   with a question saying the staging site will show production's
+//   content until `finish`. A "no" changes nothing. `--yes` skips the
+//   question, and `--dry-run` asks nothing.
 // - `finish` rebuilds in the checkout. On a conflict it stops with the
 //   rebase in progress; once the files are fixed and `git add`ed,
 //   `finish` run again carries on from there.
@@ -57,30 +79,20 @@
 // "seed" clone that wrote its history, the "work" checkout the
 // commands run in, and a "lander" clone that lands the hotfix by the
 // ordinary means between `start` and `finish`. Nothing reaches the
-// network or a real remote. GitHub's one answer is recorded
-// (test/fixtures/github/ruleset-25361439.json says where from).
+// network or a real remote. GitHub's ruleset is the recorded GET
+// (test/fixtures/github/ruleset-25361439.json says where from); a PUT
+// is answered from it, since recording one would change the real
+// ruleset.
 //
-// Criterion 10 is about documents outside this repository; its test
-// says where the wording must live and is left to the coordinator.
+// Criterion 10 names the runbook and roles/coordinator.md. The tracked
+// runbook for promotion is "Promoting to staging and e2e" in
+// docs/cloud-lanes.md, which test 10 checks; the coordinator checks
+// its own role file and the untracked release runbook.
 //
-// Questions for James, not assertions (sent to the coordinator):
-//
-// 1. How do the commands get the force-push exception? The #611
-//    repair narrowed ruleset 25361439 by hand and restored it. If the
-//    commands do the same, should they also read it back and refuse
-//    to finish until it matches the saved copy, even after a failure?
-//    A bypass actor would also open `main` while it stands.
-// 2. Between `start` and `finish` the staging site shows production's
-//    content. Should `start` warn, ask to confirm (deps.confirm), or
-//    refuse unless told James is not reviewing staging?
-// 3. Criterion 6 refuses a resolution that drops a placeholder's line,
-//    even one that resolves toward the newer change on `main`, as
-//    James's rule for conflicts says to. Should `finish` take such a
-//    drop once it is named and acknowledged (a flag), or always
-//    refuse? These tests assume the criterion as written: refuse.
-// 4. Should the freeze also be written in a tracked document, such as
-//    "Promoting to staging and e2e" in docs/cloud-lanes.md, so that
-//    test 10 can check it here?
+// Decided by the coordinator on 2026-11-18, as the test lane
+// recommended (James may overrule): the force-push window and the
+// confirmation above; criterion 6 as written, with no flag to accept
+// a lost line; the freeze written in docs/cloud-lanes.md.
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -209,19 +221,34 @@ const world = async ({ shape } = {}) => {
 
   const w = gitIn(work);
   const gitCalls = [];
-  const gh = github();
-
-  return {
-    dir, origin, work, c, gh, gitCalls,
+  const events = [];
+  const gh = github(events);
+  const t = {
+    dir, origin, work, c, gh, gitCalls, events,
     seed: s, w, o: gitIn(origin), l: gitIn(lander), lander,
+    // The answer to start's question, the questions asked, and which
+    // pushes fail.
+    answer: true, questions: [], failPush: () => false,
     deps: {
-      git: (args) => {
+      // A push is logged with the ruleset as it stood when it was made.
+      git: async (args) => {
         gitCalls.push(args);
+        if (args[0] === "push") {
+          events.push({ kind: "push", args, ruleset: gh.state() });
+          if (t.failPush(args)) {
+            throw Object.assign(new Error(`git ${args.join(" ")} failed`),
+              { stdout: "", stderr: "! [remote rejected]" });
+          }
+        }
 
         return w(args);
       },
       api: gh.api,
-      confirm: async () => true,
+      confirm: async (question) => {
+        t.questions.push(String(question));
+
+        return t.answer;
+      },
     },
     pushes: () => readFileSync(log, "utf8").split("\n").filter(Boolean)
       .map((line) => {
@@ -230,31 +257,57 @@ const world = async ({ shape } = {}) => {
         return { push, old, now, ref };
       }),
   };
+
+  return t;
 };
 
-// GitHub, answering from the recording. A write to the ruleset is kept
-// and read back; anything else was never recorded.
-const github = () => {
+// GitHub, answering from the recorded GET of ruleset 25361439. A PUT
+// is answered with that recording's shape carrying what was sent, as
+// GitHub returns the ruleset it stored; no PUT was recorded, since
+// that would change the real ruleset. With `tamper` on, a PUT that
+// gives `next` back is stored without `staging`, as if GitHub had not
+// taken the restore whole, so the read-back differs from the saved
+// copy. Any other call was never recorded.
+const github = (events) => {
   let current = structuredClone(F.ruleset);
   const calls = [];
+  const gh = { tamper: false };
   const api = async (path, { method = "GET", body } = {}) => {
     calls.push({ path, method, body });
     if (!RULESET_PATH.test(path)) {
       throw new Error(`unrecorded ${method} ${path}`);
     }
-    if (method === "GET") return structuredClone(current);
-    if (method === "PUT" || method === "PATCH") {
+    if (method === "GET") {
+      events.push({ kind: "read" });
+
+      return structuredClone(current);
+    }
+    if (method === "PUT") {
       current = { ...current, ...structuredClone(body) };
+      const include = current.conditions?.ref_name?.include ?? [];
+
+      if (gh.tamper && include.includes("refs/heads/next")) {
+        current.conditions.ref_name.include =
+          include.filter((ref) => ref !== "refs/heads/staging");
+      }
+      events.push({ kind: "write", ruleset: structuredClone(current) });
 
       return structuredClone(current);
     }
     throw new Error(`unrecorded ${method} ${path}`);
   };
 
-  return {
-    api, calls, writes: () => calls.filter((c) => c.method !== "GET"),
-  };
+  return Object.assign(gh, {
+    api, calls, state: () => structuredClone(current),
+    writes: () => calls.filter((c) => c.method !== "GET"),
+  });
 };
+
+// The parts of a ruleset that say what it protects.
+const guards = (r) => ({
+  name: r.name, target: r.target, enforcement: r.enforcement,
+  conditions: r.conditions, rules: r.rules, bypass_actors: r.bypass_actors,
+});
 
 // Every ref and what it points at.
 const refs = async (g) => Object.fromEntries((await g(["for-each-ref",
@@ -288,15 +341,16 @@ const changedRefs = (before, now) => [...new Set([
 ])].filter((k) => before[k] !== now[k]).sort();
 
 // One run of a command, as bin/nff would make it.
-const run = async (t, action, { dryRun = false } = {}) => {
+const run = async (t, action, { dryRun = false, flags = {} } = {}) => {
   const printed = [];
   const from = t.pushes().length;
   const calls = t.gitCalls.length;
+  const seen = t.events.length;
   let error;
 
   try {
     await hotfixCommand(action, [], {
-      flags: dryRun ? { "dry-run": true } : {},
+      flags: dryRun ? { ...flags, "dry-run": true } : flags,
       out: (line) => printed.push(String(line)),
     }, t.deps);
   } catch (e) {
@@ -308,6 +362,7 @@ const run = async (t, action, { dryRun = false } = {}) => {
     text: [...printed, error?.message ?? ""].join("\n"),
     pushes: t.pushes().slice(from),
     gitCalls: t.gitCalls.slice(calls),
+    events: t.events.slice(seen),
   };
 };
 
@@ -373,6 +428,50 @@ const pushTargets = (args) => {
       delete: deleting || spec.startsWith(":"),
     };
   });
+};
+
+// The pushes among a run's events that move `next` or `staging`.
+const branchPushes = (events) => events.filter((e) => e.kind === "push"
+  && pushTargets(e.args)
+    .some((x) => !x.delete && ["next", "staging"].includes(x.dst)));
+
+// One run kept its pushes to `next` and `staging` inside the window:
+// narrowed to `main` alone before the first, restored to the saved
+// copy after the last, and read back after that.
+const windowHeld = (r, label) => {
+  const pushes = branchPushes(r.events);
+  const writes = r.events.filter((e) => e.kind === "write");
+  const at = (e) => r.events.indexOf(e);
+
+  assert.ok(pushes.length > 0, `${label} pushes next or staging`);
+  assert.ok(writes.length >= 2, `${label} narrows and restores the ruleset`);
+  assert.ok(at(writes[0]) < at(pushes[0]),
+    `${label} narrows the ruleset before its first push`);
+  for (const p of pushes) {
+    assert.deepEqual(p.ruleset.conditions.ref_name.include,
+      ["refs/heads/main"], `${label} pushes while it covers main alone`);
+  }
+  assert.ok(at(writes.at(-1)) > at(pushes.at(-1)),
+    `${label} restores the ruleset after its last push`);
+  assert.deepEqual(guards(writes.at(-1).ruleset), guards(F.ruleset),
+    `${label} restores the saved copy`);
+  assert.ok(r.events.slice(at(writes.at(-1)) + 1)
+    .some((e) => e.kind === "read"), `${label} reads it back after`);
+};
+
+// No write ever left `main` open: it stays covered, both rules stay,
+// and no one may bypass them.
+const neverOpens = (events) => {
+  for (const { ruleset } of events.filter((e) => e.kind === "write")) {
+    const types = (ruleset.rules ?? []).map((rule) => rule.type);
+
+    assert.ok(ruleset.conditions.ref_name.include
+      .includes("refs/heads/main"), "main stays in the ruleset");
+    assert.ok(types.includes("non_fast_forward"),
+      "the no force-push rule stays");
+    assert.ok(types.includes("deletion"), "the no deletion rule stays");
+    assert.deepEqual(ruleset.bypass_actors, [], "no bypass actor");
+  }
 };
 
 describe("bin/nff hotfix (#612 acceptance criteria)", () => {
@@ -772,12 +871,149 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
     }
   });
 
-  it("10. the runbook and roles/coordinator.md say landings on next are "
-    + "frozen from start to finish", {
-    skip: "neither document is tracked here: the release runbook is "
-      + "~/Code/nff/north-foster-farm/.ignored/release-runbook.md "
-      + "(ignored) and roles/coordinator.md is "
-      + "~/Code/nff/bullpen/roles/coordinator.md (outside the repo), so "
-      + "the coordinator checks both",
-  }, () => {});
+  it("10. the runbook says landings on next are frozen from hotfix start "
+    + "to hotfix finish (\"Promoting to staging and e2e\" in "
+    + "docs/cloud-lanes.md)", () => {
+    const doc = readFileSync(new URL("../docs/cloud-lanes.md",
+      import.meta.url), "utf8");
+    const section = doc.split(/^## /m)
+      .find((s) => s.startsWith("Promoting to staging and e2e"));
+
+    assert.ok(section, "the section is there");
+    const said = section.split(/\n\s*\n/)
+      .map((p) => p.replace(/\s+/g, " "))
+      .some((p) => /hotfix start/.test(p) && /hotfix finish/.test(p)
+        && /\bnext\b/.test(p) && /frozen|freeze/i.test(p));
+
+    assert.ok(said, "one paragraph says landings on next are frozen from "
+      + "hotfix start to hotfix finish");
+  });
+
+  it("the force-push exception: start and finish narrow ruleset 25361439 "
+    + "to main alone around their pushes to next and staging, restore it "
+    + "even when a push fails, and read it back against the saved copy",
+  async () => {
+    const t = await world();
+
+    ok(await run(t, "start", { dryRun: true }));
+    assert.deepEqual(t.gh.writes(), [],
+      "start --dry-run writes nothing to GitHub");
+
+    const started = await run(t, "start");
+
+    ok(started);
+    windowHeld(started, "start");
+    await land(t, ...PLAIN);
+    const written = t.gh.writes().length;
+
+    ok(await run(t, "finish", { dryRun: true }));
+    assert.equal(t.gh.writes().length, written,
+      "finish --dry-run writes nothing to GitHub");
+
+    const finished = await run(t, "finish");
+
+    ok(finished);
+    windowHeld(finished, "finish");
+    neverOpens(t.events);
+
+    // A push that fails part-way still gets the ruleset restored.
+    for (const action of ["start", "finish"]) {
+      const f = await world();
+
+      if (action === "finish") {
+        ok(await run(f, "start"));
+        await land(f, ...PLAIN);
+      }
+      f.failPush = (args) => pushTargets(args)
+        .some((x) => x.dst === "staging" && !x.delete);
+
+      const r = await run(f, action);
+      const writes = r.events.filter((e) => e.kind === "write");
+      const failed = r.events.indexOf(branchPushes(r.events).at(-1));
+
+      assert.ok(r.error, `${action} fails with its push`);
+      assert.ok(failed >= 0, `${action} tried to push staging`);
+      assert.ok(writes.length >= 2
+        && r.events.indexOf(writes.at(-1)) > failed,
+      `${action} restores the ruleset after the failed push`);
+      assert.deepEqual(guards(f.gh.state()), guards(F.ruleset),
+        `${action} leaves the ruleset as it found it`);
+      neverOpens(f.events);
+    }
+
+    // A read-back that differs from the saved copy is never a success.
+    for (const action of ["start", "finish"]) {
+      const m = await world();
+
+      if (action === "finish") {
+        ok(await run(m, "start"));
+        await land(m, ...PLAIN);
+      }
+      m.gh.tamper = true;
+
+      const r = await run(m, action);
+
+      assert.ok(r.error,
+        `${action} exits non-zero when the ruleset reads back changed`);
+      assert.match(r.error.message, /ruleset|25361439/i,
+        "names the ruleset");
+      assert.match(r.error.message, /match|differ|restor/i,
+        "says it is not as it was saved");
+    }
+  });
+
+  it("finish never relaxes the linear history ruleset (25898866) and "
+    + "pushes no merge commit to next or staging", async () => {
+    const t = await world({
+      shape: async (s, c, dir) => {
+        await s(["checkout", "-q", "-b", "side", c.S1]);
+        await commit(s, dir, { "s.txt": "side\n" }, "Side work");
+        await s(["checkout", "-q", "--detach", c.N2]);
+        await s(["merge", "-q", "--no-ff", "-m", "Merge side", "side"]);
+        await s(["push", "-q", "origin", "HEAD:refs/heads/next"]);
+      },
+    });
+
+    ok(await run(t, "start"));
+
+    const fix = await land(t, ...PLAIN);
+    const r = await run(t, "finish");
+
+    for (const branch of ["next", "staging"]) {
+      assert.equal(await t.o(["rev-list", "--merges",
+        `${fix}..refs/heads/${branch}`]), "",
+      `${branch} holds no merge commit past main`);
+    }
+    assert.ok(!t.gh.calls.some((c) => /rulesets\/25898866/.test(c.path)
+      && c.method !== "GET"), "the linear history ruleset is never written");
+    if (r.error) {
+      assert.match(r.error.message, /^Refused:/,
+        "a merge commit is refused, not let through");
+    }
+  });
+
+  it("start asks before the staging site shows production's content, "
+    + "changes nothing on a no, and asks nothing with --yes or --dry-run",
+  async () => {
+    const t = await world();
+
+    t.answer = false;
+    ok(await run(t, "start", { dryRun: true }));
+    assert.deepEqual(t.questions, [], "--dry-run asks nothing");
+
+    const before = await refs(t.o);
+    const no = await run(t, "start");
+
+    assert.equal(t.questions.length, 1, "it asks once");
+    assert.match(t.questions[0], /staging/i, "the question names staging");
+    assert.match(t.questions[0], /production/i,
+      "and says it will show production's content");
+    assert.deepEqual(await refs(t.o), before, "a no changes nothing");
+    assert.deepEqual(no.pushes, [], "and pushes nothing");
+    assert.deepEqual(t.gh.writes(), [], "and writes nothing to GitHub");
+
+    ok(await run(t, "start", { flags: { yes: true } }));
+    assert.equal(t.questions.length, 1, "--yes asks nothing");
+    assert.equal(await head(t.o, "next"), t.c.M0, "and starts");
+  });
 });

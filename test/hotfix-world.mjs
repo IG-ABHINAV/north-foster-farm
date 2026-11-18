@@ -171,7 +171,7 @@ export const world = async ({ base = {}, shape } = {}) => {
     // fail (`failPush` before origin takes them, `failAfter` once
     // origin has taken them, as a dropped connection would), and what
     // CI has made of the heads origin took.
-    answer: true, questions: [], ci: "green",
+    answer: true, questions: [], asked: [], printed: [], ci: "green",
     failPush: () => false, failAfter: () => false,
     deps: {
       // A push is logged with the ruleset as it stood when it was made.
@@ -197,8 +197,11 @@ export const world = async ({ base = {}, shape } = {}) => {
 
         return gh.api(path, options);
       },
+      // What was printed before each question is kept with it, so a
+      // test can tell what the reader saw before answering.
       confirm: async (question) => {
         t.questions.push(String(question));
+        t.asked.push({ question: String(question), before: [...t.printed] });
 
         return t.answer;
       },
@@ -341,6 +344,7 @@ export const run = async (t, action, { dryRun = false, flags = {} } = {}) => {
   const seen = t.events.length;
   let error;
 
+  t.printed = printed;
   try {
     await hotfixCommand(action, [], {
       flags: dryRun ? { ...flags, "dry-run": true } : flags,

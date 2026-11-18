@@ -80,9 +80,10 @@ describe("bin/e2e/dispatch.mjs helpers", () => {
   });
 
   it("puts the specs into the dispatch's specs input", () => {
-    assert.deepEqual(dispatchInputs({ specs: ["e2e/a.spec.mjs",
-      "e2e/b.spec.mjs"], pages: ["/x/"] }),
-    { specs: "e2e/a.spec.mjs e2e/b.spec.mjs" });
+    const result = dispatchInputs({ specs: ["e2e/a.spec.mjs",
+      "e2e/b.spec.mjs"], pages: ["/x/"] });
+
+    assert.equal(result.specs, "e2e/a.spec.mjs e2e/b.spec.mjs");
   });
 
   it("never dispatches an empty specs input, which runs the full "

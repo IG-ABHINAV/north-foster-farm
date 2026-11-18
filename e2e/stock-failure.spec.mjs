@@ -23,8 +23,14 @@ const flaky = async (page, state) => {
   });
 };
 
+// The clock is paused from the start: an installed clock still runs in
+// real time, so a slow load (staging, run 44379156341) let the backoff
+// ask four times before the test had counted one.
 const open = async (page, cart) => {
-  await page.clock.install();
+  const start = Date.now();
+
+  await page.clock.install({ time: start });
+  await page.clock.pauseAt(start + 1_000);
   await page.goto(`/order/${cart ? `?add=${cart}` : ""}`);
 };
 

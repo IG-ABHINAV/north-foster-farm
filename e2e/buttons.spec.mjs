@@ -5,6 +5,7 @@
 // answers in the page and posts nothing.
 
 import { OrderPage, SKU, expect, test } from "./support/order.mjs";
+import { settled } from "./support/settled.mjs";
 
 const look = (el) => el.evaluate((node) => {
   const cs = getComputedStyle(node);
@@ -21,7 +22,7 @@ const signUp = (page) => page.locator("footer [data-farm-list-form] button");
 test.describe("button states", () => {
   test("a tapped button returns to rest", async ({ page }, info) => {
     test.skip(info.project.name !== "phone", "touch only");
-    await page.goto("/about/");
+    await settled(page, () => page.goto("/about/"));
 
     const button = signUp(page);
 
@@ -38,7 +39,7 @@ test.describe("button states", () => {
   test("a hovered button lifts; a tabbed one shows its ring",
     async ({ page }, info) => {
       test.skip(info.project.name !== "desktop", "mouse and keyboard");
-      await page.goto("/about/");
+      await settled(page, () => page.goto("/about/"));
 
       const button = signUp(page);
 

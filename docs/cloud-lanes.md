@@ -311,6 +311,64 @@ here instead of restating it (2026-11-01, #494).
    `record-shape` always runs: a push to `staging` covers every commit
    since its last tip, and one green run on `next` doesn't vouch for
    the earlier pushes.
+9. **Landings on `next` are frozen from `bin/nff hotfix start` to
+   the second `bin/nff hotfix finish`** (#612, 2026-11-18), the
+   hotfix's own pull request excepted. Until the first `finish`,
+   `next` and `staging` stand at `main`'s commit and carry the hotfix
+   alone. Between the two runs of `finish` the freeze matters most:
+   `next` holds only the rebuilt staging while its checks run, and
+   `staging` takes exactly that commit, so a landing then would make
+   the second `finish` refuse. See "Hotfix" below.
+
+## Hotfix
+
+`main` moves only by a fast-forward from `staging` (James,
+2026-11-18), so a hotfix takes the road every change takes: `next`,
+then `staging`, then `main`. The commit that reaches `main` is the
+one that was tested, never a copy of it.
+
+When `staging` is fit to release, a hotfix needs nothing special. It
+lands on `next` by its pull request and is promoted with the rest.
+
+When `staging` holds work not fit to release, two commands set that
+work aside and bring it back (#612). Both take `--dry-run`, which
+prints the plan and changes nothing.
+
+1. `bin/nff hotfix start` keeps the heads of `next` and `staging` as
+   the branches `hotfix/next` and `hotfix/staging`, and puts `next`
+   and `staging` at `main`'s commit. It asks first, since the staging
+   site then shows production's content (`--yes` answers for a
+   script), and refuses unless both branches contain `main`, the
+   working tree is clean and no `hotfix/*` branch exists.
+2. The hotfix lands on `next` by its pull request and goes to
+   `staging` and `main` by `bin/nff promote`, with the usual checks.
+3. `bin/nff hotfix finish` refuses until `main` has moved and `next`,
+   `staging` and `main` are one commit. It rebuilds the placeholders
+   on `main` in the checkout it runs in, stopping on a conflict with
+   the commit and files named: fix them, `git add` them and run it
+   again. It refuses to push if the rebuilt branches lack a line a
+   placeholder commit added, and names each commit dropped because
+   `main` already has it. Then it force-pushes `next` to the rebuilt
+   staging and keeps the rebuilt next as `hotfix/rebuilt`. `staging`
+   stays at `main`, since the "required checks" ruleset (25361919)
+   lets it take only a commit whose checks passed, and those run only
+   on a push to `next`, `staging` or `main`.
+4. Once `lint-and-test`, `supply-chain` and `codeql` are green on
+   `next`, `bin/nff hotfix finish` again moves `staging` to that
+   commit and `next` to `hotfix/rebuilt`, both fast-forwards. It
+   refuses, naming each check not yet green, until all three are. It
+   then deletes the `hotfix/*` branches and names the lanes that must
+   rebase. So `staging` takes only what a push to `next` proved.
+
+`start` and the first `finish` force-push inside a window on the
+"no force-push or deletion" ruleset (25361439): narrowed to `main`
+alone for the push, then restored from the copy saved first and read
+back against it, even when the push fails. A read-back that differs
+is an error naming the ruleset. The second `finish` only
+fast-forwards and opens no window. Neither the "linear history"
+ruleset (25898866) nor the required checks are ever relaxed: the
+rebuilt branches hold no merge commit, and `staging` waits for its
+checks.
 
 ## The e2e suite against staging
 

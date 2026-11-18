@@ -42,6 +42,7 @@ import { verifyEnv } from "./env/verify.mjs";
 import { setSchedule } from "./schedule-env.mjs";
 import { shipLog } from "./ship-log.mjs";
 import { USAGE as E2E_USAGE, e2eCommand } from "./e2e/dispatch.mjs";
+import { USAGE as HOTFIX_USAGE, hotfixCommand } from "./hotfix.mjs";
 import { USAGE as PROMOTE_USAGE, promoteCommand } from "./promote.mjs";
 import { USAGE as REDEPLOY_USAGE, redeploy } from "./redeploy.mjs";
 import { USAGE as SUPPLY_USAGE, supplyCommand } from "./supply/waive.mjs";
@@ -471,6 +472,7 @@ ${BREAKER_USAGE}
 ${GATE_USAGE}
 ${SUPPLY_USAGE}
 ${PROMOTE_USAGE}
+${HOTFIX_USAGE}
 ${E2E_USAGE}
 ${REDEPLOY_USAGE}
   bin/nff health                     what /api/health would answer
@@ -1221,6 +1223,9 @@ const run = async () => {
   }
   if (group === "promote") {
     return promoteCommand(action, rest, { flags, out });
+  }
+  if (group === "hotfix") {
+    return hotfixCommand(action, rest, { flags, out });
   }
   if (group === "e2e") {
     process.exitCode = await e2eCommand(words.slice(1), { flags, out });

@@ -156,16 +156,18 @@ runs the `lint-and-test` check (`.github/workflows/ci.yml`), and
 `main` to a `staging` commit James has OKed here. When each moves,
 and the full e2e suite that gates `main`, is the #502 rule in
 "Promoting to staging and e2e" in `docs/cloud-lanes.md` (2026-11-01:
-the copy here moved there, #494). Neither ever
-takes a merge commit or a rebase-merge, save a release branch's merge
-into `main`, which carries the tested `staging` commit's tree
-(`docs/security.md`): promotion moves a branch to a SHA already
-checked, so the commit that ships is the commit that was tested.
+the copy here moved there, #494). None of the three ever
+takes a merge commit or a rebase-merge, and `main` moves only by a
+fast-forward from `staging`: promotion moves a branch to a SHA already
+checked, so the commit that ships is the commit that was tested. A
+hotfix rides the same road ("Hotfix" in `docs/cloud-lanes.md`).
 
-Two rulesets, with no bypass actor, enforce it (`docs/security.md`).
-All three branches take fast-forwards only, with no force push or
-deletion, and linear history on `next` and `staging` (`main` takes a
-release branch's merge; 2026-11-01, #494). `staging` and `main` also require `lint-and-test`,
+Rulesets with no bypass actor enforce it (`docs/security.md`). All
+three branches take fast-forwards only, with no force push or
+deletion, and linear history (2026-11-18, #612: linear history covered
+`next` and `staging` only and `main` took a release branch's merge;
+since James's rule of 2026-11-18 it covers all three and `main` takes
+no merge). `staging` and `main` also require `lint-and-test`,
 `supply-chain` and `codeql`, so a push to a commit with no passing
 check is refused. `next` requires no check, so the lanes can push to
 it. `bin/nff promote staging|main` makes the two promotions and

@@ -256,15 +256,22 @@ to-do list and prints the line to paste into the pull request.
 
 ## Fast-forward only
 
-`next`, `staging` and `main` take fast-forwards only. Two rulesets on
-`north-foster-farm`, with no bypass actor:
+`next`, `staging` and `main` take fast-forwards only. Three rulesets
+on `north-foster-farm`, with no bypass actor:
 
-- `fast-forward only: next, staging, main`: no force push, no
-  deletion, and linear history on `next` and `staging` only, so that
-  `main` can take a release branch's merge (below; 2026-11-01, #494:
-  this said linear history on all three, against the release rule).
-- `required checks: staging, main`: `lint-and-test`, `supply-chain`
-  and `codeql`, each from the GitHub Actions app. James decided the
+- `no force-push or deletion: next, staging, main` (25361439).
+  `bin/nff hotfix start` and `finish` narrow it to `main` alone for
+  their force-pushes and restore it after ("Hotfix" in
+  `docs/cloud-lanes.md`).
+- Linear history (25898866) on all three (2026-11-18, #612: this said
+  linear history on `next` and `staging` only, so that `main` could
+  take a release branch's merge; since James's rule of 2026-11-18
+  `main` moves only by a fast-forward from `staging`).
+- `required checks: staging, main` (25361919): `lint-and-test`,
+  `supply-chain` and `codeql`, each from the GitHub Actions app. Never
+  relaxed for a hotfix: `bin/nff hotfix finish` takes two runs so that
+  `staging` gets only a commit whose checks passed on `next` (#612,
+  2026-11-18). James decided the
   next sets on 2026-10-20 (#283): `build` on both, `release-audit` on
   `main` only, `record-shape` on `staging`, and the e2e checks. They
   are applied once each job is green and James confirms.
@@ -302,7 +309,11 @@ check belongs to its SHA. So:
   API (`stagingSuite` in `bin/promote.mjs`). A run that stood down for
   a newer deploy also ends green, but runs no spec, so it does not
   count.
-- **A release branch to `main`:** `bin/nff promote main release/<name>`
+- **A release branch to `main`:** no longer used (2026-11-18, #612):
+  linear history now covers `main`, which refuses the merge this
+  describes, and a hotfix takes `next`, `staging` and `main` instead
+  ("Hotfix" in `docs/cloud-lanes.md`). The code is still in
+  `bin/promote.mjs`. `bin/nff promote main release/<name>`
   (James, 2026-10-26) takes `main` one step by a merge commit, so that
   every staging commit stays reachable from `main`. It is still a
   fast-forward of `main`. The commit must have exactly two parents: the

@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { MACHINE_COOKIE } from "../../netlify/functions/lib/gate.mjs";
 import { SCOPE_COOKIE } from "../../netlify/functions/lib/stock-pins.mjs";
 import { countCall } from "./calls.mjs";
+import { challengeError, isChallenge } from "./challenge.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -126,6 +127,9 @@ export const op = async (name, args = {}, {
 
     const detail = await res.text();
 
+    if (isChallenge(res.status, detail)) {
+      throw challengeError(`e2e ${name}`, res.status);
+    }
     throw new Error(`e2e ${name}: ${res.status} ${detail}`);
   }
 };

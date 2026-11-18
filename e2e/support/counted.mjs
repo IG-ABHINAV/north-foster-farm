@@ -24,6 +24,9 @@ import { test as base, expect } from "@playwright/test";
 import {
   NO_SPEC, countCall, setChargeTo, workerTally, writeWorker,
 } from "./calls.mjs";
+import {
+  challengeError, checkResponse, takeChallenges,
+} from "./challenge.mjs";
 import { BASE_URL } from "./staging.mjs";
 
 export { expect };
@@ -103,11 +106,17 @@ const watchRequests = (api, spec) => {
   const { fetch } = api;
 
   // Its get(), post() and the rest call this.fetch.
-  api.fetch = (urlOrRequest, options) => {
-    countCall(typeof urlOrRequest === "string"
-      ? urlOrRequest : urlOrRequest.url(), BASE_URL, spec);
+  api.fetch = async (urlOrRequest, options) => {
+    const url = typeof urlOrRequest === "string"
+      ? urlOrRequest : urlOrRequest.url();
 
-    return fetch.call(api, urlOrRequest, options);
+    countCall(url, BASE_URL, spec);
+
+    const res = await fetch.call(api, urlOrRequest, options);
+
+    await checkResponse(res.status(), url, () => res.text());
+
+    return res;
   };
 
   return api;
@@ -130,6 +139,9 @@ const watchContext = (context, spec = specNow()) => {
   watchRequests(context.request, spec);
   context.on("requestfinished", done);
   context.on("requestfailed", done);
+  context.on("response", (res) => checkResponse(
+    res.status(), res.url(), () => res.text()
+  ));
   context.on("page", (page) => watchPage(page, spec));
   for (const page of context.pages()) watchPage(page, spec);
   context.newPage = async (...args) => watchPage(
@@ -174,4 +186,20 @@ export const test = base.extend({
     for (const fn of undo) fn();
     writeWorker(workerTally(), `${info.workerIndex}-${process.pid}`);
   }, { scope: "worker", auto: true }],
+  // A test that met Netlify's bot challenge fails naming it, whatever
+  // else went wrong (challenge.mjs).
+  // eslint-disable-next-line no-empty-pattern
+  netlifyChallenge: [async ({}, use) => {
+    takeChallenges();
+    await use();
+
+    const urls = takeChallenges();
+
+    if (urls.length) {
+      throw challengeError(
+        `${urls.length} request(s), first ${new URL(urls[0]).pathname}`,
+        403
+      );
+    }
+  }, { auto: true }],
 });

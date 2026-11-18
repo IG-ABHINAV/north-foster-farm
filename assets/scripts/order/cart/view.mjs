@@ -71,8 +71,8 @@ const setProp = (el, name, px) => {
 // the toolbar showing, which never changes as the page scrolls. The
 // one scroll it ever makes: when the keyboard rises with the code
 // field focused, the field is brought into its scroller's view once,
-// since Chromium does not do that for a scroller that shrinks after
-// the focus.
+// at once, since Chromium does not do that for a scroller that shrinks
+// after the focus.
 export const watchKeyboard = (pane, { onInset } = {}) => {
   const visual = window.visualViewport;
 
@@ -106,12 +106,16 @@ export const watchKeyboard = (pane, { onInset } = {}) => {
     const was = before;
 
     before = inset;
+    // At once, never on a later frame: a phone that draws late (WebKit
+    // on CI draws every 460 to 700 ms) left the field out of view
+    // until that frame came, and the frame then undid any scroll of
+    // the body made since (#635).
     if (inset > was) {
       const field = document.activeElement;
 
       if (field && pane.contains(field)
         && field.matches("[data-field='code']")) {
-        requestAnimationFrame(() => field.scrollIntoView({ block: "nearest" }));
+        field.scrollIntoView({ block: "nearest" });
       }
     }
     if (onInset) onInset(inset, was);

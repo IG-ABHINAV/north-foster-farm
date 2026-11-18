@@ -63,8 +63,7 @@ export const paidOnReplaced = (orders, deliveries, terms) =>
   [...deliveries].sort((a, b) => a.date.localeCompare(b.date)).map(({
     date,
   }) => {
-    const monday = addDays(date, -((weekday(date) + 6) % 7));
-    const replaced = addDays(monday, (terms.delivery.weekday + 6) % 7);
+    const replaced = replacedDay(date, terms);
     const ids = replaced === date ? [] : orders
       .filter((o) => o.status === "paid" && o.fulfilment
         && o.fulfilment.method === "delivery"
@@ -74,6 +73,37 @@ export const paidOnReplaced = (orders, deliveries, terms) =>
 
     return { date, replaced, ids };
   });
+
+// The default delivery day in the week of `date`.
+const replacedDay = (date, terms) => addDays(
+  addDays(date, -((weekday(date) + 6) % 7)),
+  (terms.delivery.weekday + 6) % 7);
+
+// The lines `schedule set` prints about paid orders on the replaced
+// days. The variable is already set when this runs, so a failed read
+// is reported and never stops the deploy that follows; with no
+// delivery line count is never called, so the orders are not read.
+// count() -> Promise<paidOnReplaced's result>, the orders read in it.
+// -> Promise<[line]>.
+export const replacedReport = async (count, deliveries, terms) => {
+  if (!deliveries.length) return [];
+
+  let replaced;
+
+  try {
+    replaced = await count();
+  } catch (e) {
+    const days = [...new Set(deliveries.map((d) =>
+      replacedDay(d.date, terms)))].sort().join(", ");
+
+    return [`Couldn't count paid orders on ${days}: ${e.message}`];
+  }
+
+  return replaced.map(({ date, replaced: from, ids }) =>
+    `Delivery moved to ${date} from ${from}: ${ids.length} paid ` +
+    `delivery order${ids.length === 1 ? "" : "s"} still on ${from}${
+      ids.length ? ` (${ids.join(", ")})` : ""}.`);
+};
 
 // Sets PICKUP_SCHEDULE on Netlify and reads it back. On 2026-09-28 a
 // set to the staging branch exited 0 and left nothing on any site, and

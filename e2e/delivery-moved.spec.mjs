@@ -4,7 +4,7 @@
 // November 25 and then Thursday, December 3, not the 26th, and the
 // countdown notice names Wednesday. Criteria tests, written before the
 // change; the unit tests and the contract are in
-// test/delivery-moved.criteria.mjs.
+// test/delivery-moved.test.mjs.
 //
 // /api/dates is answered as the server would answer with the move:
 // the real lib/dates.mjs over the parsed line, the schedule carrying

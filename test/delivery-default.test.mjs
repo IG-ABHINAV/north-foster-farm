@@ -2,7 +2,7 @@
 // and must go on holding once the schedule can move a week. Written
 // before the change, from the issue's spec and "Done when"; one test
 // per criterion, named for it. The contract and the criteria that
-// fail until the change are in test/delivery-moved.criteria.mjs.
+// fail until the change are in test/delivery-moved.test.mjs.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";

@@ -40,7 +40,7 @@ import {
 } from "./env/sample.mjs";
 import { verifyEnv } from "./env/verify.mjs";
 import {
-  checkedSchedule, paidOnReplaced, setSchedule,
+  checkedSchedule, paidOnReplaced, replacedReport, setSchedule,
 } from "./schedule-env.mjs";
 import { shipLog } from "./ship-log.mjs";
 import { USAGE as E2E_USAGE, e2eCommand } from "./e2e/dispatch.mjs";
@@ -1809,14 +1809,14 @@ const run = async () => {
 
     // A Thursday a delivery line replaces may hold paid deliveries
     // already: the farm moves them or the customers change them
-    // (#640). Read only; nothing is moved here.
-    const replaced = paidOnReplaced(await allOrders(stores),
+    // (#640). Read only; nothing is moved here, and a failed read is
+    // reported without stopping the deploy below.
+    const count = async () => paidOnReplaced(await allOrders(stores),
       checked.deliveries, terms);
 
-    for (const { date, replaced: from, ids } of replaced) {
-      out(`Delivery moved to ${date} from ${from}: ${ids.length} paid ` +
-        `delivery order${ids.length === 1 ? "" : "s"} still on ${from}${
-          ids.length ? ` (${ids.join(", ")})` : ""}.`);
+    for (const line of await replacedReport(count, checked.deliveries,
+      terms)) {
+      out(line);
     }
     out(`Set PICKUP_SCHEDULE for ${targets.join(" and ")} on site ${
       process.env.NETLIFY_SITE_ID}, and read it back.`);

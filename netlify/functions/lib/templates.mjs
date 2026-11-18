@@ -51,9 +51,9 @@ const deliveryOn = (from, date) => (addDays(from, 7) === date
   : `on ${label(date)}`);
 
 // The first delivery day after `date`, as the functions' schedule has
-// it (admin's nextDeliveryDay, which imports this file).
-const deliveryAfter = (date) => {
-  const schedule = pickupSchedule();
+// it (admin's nextDeliveryDay, which imports this file). The caller
+// passes the schedule from the env it holds; process.env otherwise.
+const deliveryAfter = (date, schedule = pickupSchedule()) => {
   let d = addDays(date, 1);
 
   while (!isDeliveryDay(d, terms, schedule)) d = addDays(d, 1);
@@ -656,13 +656,13 @@ const missedOn = (date, now) => {
 };
 
 export const missedDelivery = (order, {
-  pickUrl, links, now = new Date(),
+  pickUrl, links, now = new Date(), schedule,
 } = {}) => {
   const title = "We couldn't deliver your order";
   const fee = keptFee(order);
   const { date } = order.fulfilment;
   const { late, day } = missedOn(date, now);
-  const next = deliveryOn(date, deliveryAfter(date));
+  const next = deliveryOn(date, deliveryAfter(date, schedule));
   const hold = label((order.question && order.question.until)
     || addDays(date, HOLD_DAYS));
   const items = dollars(order.totals.total - fee);

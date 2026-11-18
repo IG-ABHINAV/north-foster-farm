@@ -1,5 +1,5 @@
 // Shared by the tests for moving a week's delivery day (#640):
-// test/delivery-moved.criteria.mjs and test/delivery-default.test.mjs.
+// test/delivery-moved.test.mjs and test/delivery-default.test.mjs.
 // Not a test file itself. Orders are placed through POST /api/orders
 // with the farm's schedule in `env`, as the function reads it on
 // every request; the fakes are those of test/group-delivery-stored.mjs.

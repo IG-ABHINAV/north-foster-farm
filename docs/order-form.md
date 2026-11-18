@@ -421,8 +421,13 @@ skipped rather than shifted:
   names each moved week ("delivery moved to Wednesday, November 25")
   and refuses anything after the word, two lines in one week, and a
   line on a holiday; `schedule set` then counts the paid deliveries
-  still on each replaced Thursday, which the farm moves
-  (`bin/nff orders move`) or tells. One rule decides a day,
+  still on each replaced Thursday (a failed count is printed and the
+  deploy still starts). Before moving a week whose Thursday already
+  has paid delivery orders, move those orders first with
+  `bin/nff orders change`: the order page does not yet keep an
+  existing order's replaced Thursday when the customer edits it
+  (#643), though the API's rule accepts such an edit. One rule
+  decides a day,
   `isDeliveryDay` in `lib/dates.mjs`, and every reader follows it:
   the dates offered, the server's checks of an order and an edit,
   the page's own check (`DateLists.schedule()`, from `/api/dates`),

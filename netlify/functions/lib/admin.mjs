@@ -801,6 +801,7 @@ export const tellMissed = async (stores, order, {
   return sendForOrder(stores, held, "missedDelivery",
     missedDelivery(held, {
       pickUrl: orderUrlFor(env, order.id), links: mailLinks(env), now,
+      schedule: pickupSchedule(env),
     }), {
       mail, env, now,
       idempotencyKey: `${order.id}-missedDelivery-${order.attempted.date}`,

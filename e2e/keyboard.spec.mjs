@@ -27,8 +27,8 @@ import {
   FULL_CART, OrderPage, expect, test, unfoldCart,
 } from "./support/order.mjs";
 import {
-  ACCOUNT_TABS, builtSitemap, cannedDates, keepHome, namedPages, signedIn,
-  sitemap,
+  ACCOUNT_TABS, builtSitemap, cannedDates, everyPage, keepHome, namedPages,
+  signedIn, sitemap,
 } from "./support/canned.mjs";
 
 const WIDTHS = [1280, 390];
@@ -43,6 +43,18 @@ const UNLISTED = ["/login/", "/404.html"];
 // reads the sitemap at run time and walks every page, as before.
 const BUILT = builtSitemap(process.env.E2E_BASE_URL);
 const PAGES = BUILT && [...new Set([...BUILT, ...UNLISTED])];
+
+// How long one page's walk may take, so a page that hangs fails as
+// itself, not after minutes (#607, qa). About three times the slowest
+// walk seen: the one test took 9.8 to 11.6 minutes for both widths of
+// some 29 pages on WebKit, about 12 s a page, and the empty order page
+// is the longest walk (its settle waits for the page's height to hold).
+// Raise one from a run's list output (each test prints its time) when
+// three times a page's walk comes near it.
+const PAGE_TIMEOUT = 90_000;
+const ORDER_TIMEOUT = 3 * 60_000;
+const pageTimeout = (path) => (path === "/order/" ? ORDER_TIMEOUT
+  : PAGE_TIMEOUT);
 
 // Helpers the walk calls in the page, installed on every load.
 const install = () => {
@@ -534,18 +546,27 @@ for (const width of WIDTHS) {
       // take one: --grep " /about/ tabs cleanly" (with the leading
       // space, " / tabs cleanly" is the home page alone) or
       // E2E_PAGES="/about/".
-      for (const path of namedPages(PAGES)) {
-        test(`${path} tabs cleanly`, async ({ page, browserName }) => {
-          // The order page, empty, is the longest walk; with a full
-          // cart WebKit has run past two minutes (below).
-          test.setTimeout(5 * 60_000);
-          await tabsCleanly(page, path, browserName);
-        });
-      }
+      //
+      // Parallel, so the pages spread over the run's workers and, in a
+      // sharded run, its shards. Each test has a context of its own,
+      // as every test does; a walk only presses Tab, so it writes
+      // nothing a page beside it could read. The untitled group keeps
+      // the titles as they were and the walks below in the default
+      // mode.
+      test.describe(() => {
+        test.describe.configure({ mode: "parallel" });
+
+        for (const path of namedPages(PAGES)) {
+          test(`${path} tabs cleanly`, async ({ page, browserName }) => {
+            test.setTimeout(pageTimeout(path));
+            await tabsCleanly(page, path, browserName);
+          });
+        }
+      });
     } else {
       test("every page tabs cleanly",
         async ({ page, request, browserName }) => {
-          const paths = namedPages([...await sitemap(request), ...UNLISTED]);
+          const paths = everyPage([...await sitemap(request), ...UNLISTED]);
 
           // A Tab walk of some 30 pages takes WebKit over two minutes.
           test.setTimeout(10 * 60_000);

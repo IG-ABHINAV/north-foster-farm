@@ -210,3 +210,16 @@ export const namedPages = (paths, names = process.env.E2E_PAGES) => {
 
   return paths.filter((path) => wanted.includes(path));
 };
+
+// Every page, for the one test that walks them all (against staging,
+// where the pages are read at run time): E2E_PAGES set there throws,
+// since that test can't take one page, and a run that asked for one
+// must not quietly walk them all or narrow the one test (#607, qa).
+export const everyPage = (paths, names = process.env.E2E_PAGES) => {
+  if ((names || "").trim()) {
+    throw new Error("E2E_PAGES works only on a local build, where each " +
+      "page is a test of its own: unset it to walk every page here");
+  }
+
+  return paths;
+};

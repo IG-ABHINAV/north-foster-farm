@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
 import {
-  builtSitemap, namedPages, sitemapLocs,
+  builtSitemap, everyPage, namedPages, sitemapLocs,
 } from "../e2e/support/canned.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "e2e-pages-"));
@@ -89,5 +89,20 @@ describe("namedPages", () => {
   it("throws on a page the walk doesn't have", () => {
     assert.throws(() => namedPages(paths, "/about/ /abuot/"),
       /E2E_PAGES names pages the walk doesn't have: \/abuot\//);
+  });
+});
+
+// The one test, against staging, walks every page or none (#607, qa).
+describe("everyPage", () => {
+  const paths = ["/", "/about/"];
+
+  it("is every page when none is named", () => {
+    assert.deepEqual(everyPage(paths, undefined), paths);
+    assert.deepEqual(everyPage(paths, " "), paths);
+  });
+
+  it("throws rather than narrow the one test", () => {
+    assert.throws(() => everyPage(paths, "/about/"),
+      /E2E_PAGES works only on a local build/);
   });
 });

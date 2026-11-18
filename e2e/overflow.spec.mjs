@@ -13,7 +13,17 @@
 //
 // A failure names the element that sticks out: the outermost one
 // whose right edge passes the viewport's.
+//
+// Against staging the page walks are paced (#653): at full speed,
+// eight walks of 29 loads each from one address, Netlify's bot
+// challenge answered them partway in. So the file runs its tests in
+// order in one worker (never two walks at once), and each walk waits
+// PACE_MS (support/pace.mjs) between page loads. The other three
+// tests at each width keep their pace; they only queue behind the
+// walks, as they already did with fullyParallel off. A local build
+// makes no wait.
 
+import { pace } from "./support/pace.mjs";
 import {
   FULL_CART, OrderPage, expect, test, unfoldCart,
 } from "./support/order.mjs";
@@ -22,6 +32,9 @@ import {
 } from "./support/canned.mjs";
 
 const WIDTHS = [375, 768, 992, 1440];
+
+// In order, in one worker, whatever fullyParallel says (#653).
+test.describe.configure({ mode: "default" });
 
 // Not in the sitemap. /account/ is left out: signed out, it sends you
 // to /login/, and the signed-in test below covers it.
@@ -89,10 +102,11 @@ for (const width of WIDTHS) {
       await keepHome(page, baseURL);
     });
 
-    test("every page fits", async ({ page, request }) => {
+    test("every page fits", async ({ page, request, baseURL }) => {
       const paths = [...await sitemap(request), ...UNLISTED];
 
-      for (const path of paths) {
+      for (const [i, path] of paths.entries()) {
+        if (i) await pace(baseURL);
         await page.goto(path);
         await fits(page, width, path);
       }
@@ -103,7 +117,7 @@ for (const width of WIDTHS) {
     // A layout that needs the image to shrink it overflows meanwhile;
     // without images, every run sees that moment.
     test("every page fits before its images load",
-      async ({ page, request }) => {
+      async ({ page, request, baseURL }) => {
         const paths = [...await sitemap(request), ...UNLISTED];
 
         await page.route("**/*", (route) => (
@@ -111,7 +125,8 @@ for (const width of WIDTHS) {
             ? route.abort()
             : route.fallback()
         ));
-        for (const path of paths) {
+        for (const [i, path] of paths.entries()) {
+          if (i) await pace(baseURL);
           await page.goto(path);
           await fits(page, width, `${path}, no images`);
         }

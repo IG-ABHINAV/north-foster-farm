@@ -256,10 +256,15 @@ test.describe("loading skeletons (#271)", () => {
     await page.goto("/account/");
 
     const region = page.locator("#account-region");
-    const failed = region.locator(".skeleton-failed");
+    // The region's own alert. The Membership pane inside it is a region
+    // of its own (#577) with its own alert, for when the group alone
+    // fails; with the whole account failed, it stays out of sight.
+    const failed = region.locator(":scope > .skeleton-failed");
 
     await expect(failed).toBeVisible();
     await expect(failed).toContainText("We couldn't load your account.");
+    await expect(region.getByText("We couldn't load your group."))
+      .toBeHidden();
     // The site's alert component (#333).
     await expect(failed).toHaveClass(/\balert\b/);
     await expect(region).toHaveAttribute("data-load", "failed");
@@ -293,9 +298,11 @@ test.describe("loading skeletons (#271)", () => {
 
       const region = page.locator("#account-region");
 
-      await expect(region.locator(".skeleton-failed")).toBeVisible({
-        timeout: GIVE_UP_MS + 5000,
-      });
+      // The region's own alert, not the Membership pane's (#577).
+      await expect(region.locator(":scope > .skeleton-failed"))
+        .toBeVisible({ timeout: GIVE_UP_MS + 5000 });
+      await expect(region.getByText("We couldn't load your group."))
+        .toBeHidden();
 
       const states = await page.evaluate(() => window.e2eLoads);
       const at = (name) => states.find(([state]) => state === name)?.[1];

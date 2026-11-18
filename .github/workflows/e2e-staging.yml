@@ -55,6 +55,12 @@ jobs:
     # e2e-run.yml (test/workflows.test.mjs checks the tag).
     container: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e # v1.62.1-noble
     timeout-minutes: 120
+    # A container job runs run: steps with sh (dash on this image) unless
+    # a shell is declared, and Run and Alert are bash (#648). bash runs
+    # them as bash -e -o pipefail.
+    defaults:
+      run:
+        shell: bash
     env:
       E2E_BASE_URL: https://staging--north-foster-farm.netlify.app
     steps:

@@ -67,6 +67,12 @@ jobs:
       fail-fast: false
       matrix:
         shard: ${{ fromJSON(inputs.shards) }}
+    # A container job runs run: steps with sh (dash on this image) unless
+    # a shell is declared. Declared so a bash line here cannot break the
+    # way e2e-staging.yml did (#648). bash runs as bash -e -o pipefail.
+    defaults:
+      run:
+        shell: bash
     env:
       E2E_PORT: 8895
       # The container's localhost resolves to ::1 first, so the server

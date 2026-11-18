@@ -24,6 +24,12 @@ on:
         description: More Playwright arguments
         type: string
         default: ""
+      # Site paths e2e.yml's plan checked (#615). The Run step gets them
+      # as E2E_PAGES through env only; empty means every page.
+      pages:
+        description: Only these site pages, space-separated
+        type: string
+        default: ""
       passes:
         type: number
         default: 2
@@ -110,6 +116,7 @@ jobs:
           E2E_BASE_URL: http://localhost:${{ env.E2E_PORT }}
           PASSES: ${{ inputs.passes }}
           ARGS: ${{ inputs.args }}
+          E2E_PAGES: ${{ inputs.pages }}
           SHARD: ${{ matrix.shard }}/${{ inputs.total }}
           WORKERS: ${{ inputs.workers }}
           PLAYWRIGHT_HTML_OPEN: never

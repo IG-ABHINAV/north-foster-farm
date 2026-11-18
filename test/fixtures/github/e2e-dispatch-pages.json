@@ -1,0 +1,22 @@
+{
+  "_source": "RECORDED from GitHub on 2026-11-18 by the pages-input lane with gh 2.104.0, for #615. dispatch: POST /repos/north-foster-farm/north-foster-farm/actions/workflows/e2e.yml/dispatches with ref lane/pages-input (54fa0731, the first commit whose e2e.yml takes pages), inputs.specs 'not-a-spec' (refused by the plan job, so the run cost nothing), inputs.pages '/about/' and return_run_details true. GitHub answered 200 with the run's details, so it took the pages input. Nothing to scrub: the answer holds only the run's id and links. Otherwise as GitHub sent it.",
+  "dispatch": {
+    "request": {
+      "method": "POST",
+      "path": "/repos/north-foster-farm/north-foster-farm/actions/workflows/e2e.yml/dispatches",
+      "body": {
+        "ref": "lane/pages-input",
+        "inputs": {
+          "specs": "not-a-spec",
+          "pages": "/about/"
+        },
+        "return_run_details": true
+      }
+    },
+    "response": {
+      "workflow_run_id": 44271005868,
+      "run_url": "https://api.github.com/repos/north-foster-farm/north-foster-farm/actions/runs/44271005868",
+      "html_url": "https://github.com/north-foster-farm/north-foster-farm/actions/runs/44271005868"
+    }
+  }
+}

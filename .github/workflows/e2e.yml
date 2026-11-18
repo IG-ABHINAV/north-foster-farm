@@ -28,6 +28,13 @@ name: E2E
 # safer than --grep text, which has no short safe subset: its quoting
 # and regex syntax are the injection surface. Name the file instead.
 #
+# A named-specs run may also name pages (-f pages="/about/ /order/",
+# #615): site paths handed to the specs as E2E_PAGES, so the keyboard
+# walk tabs through those pages only. Pages without specs are refused,
+# and so is any word that is not a plain site path (^/[A-Za-z0-9._/-]*$,
+# no ".." or "//"). Like specs, the value reaches a script only through
+# env.
+#
 # A named-specs run never reports as e2e or e2e-burn-in-advisory: its
 # gate jobs are called e2e-named and e2e-burn-in-named, so it cannot
 # put a passing required check on a commit. It is refused on next,
@@ -40,6 +47,13 @@ on:
         description: >-
           Only these specs, once, no burn-in: space-separated paths
           under e2e/ (e2e/foo.spec.mjs). Empty runs the full suite.
+        type: string
+        default: ""
+      pages:
+        description: >-
+          Only these site pages, with named specs only: space-separated
+          paths (/about/ /order/), handed to the specs as E2E_PAGES.
+          Empty walks every page.
         type: string
         default: ""
 
@@ -55,13 +69,18 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       specs: ${{ steps.check.outputs.specs }}
+      pages: ${{ steps.check.outputs.pages }}
     steps:
-      - name: Check the named specs
+      - name: Check the named specs and pages
         id: check
         env:
           SPECS: ${{ inputs.specs }}
+          PAGES: ${{ inputs.pages }}
           REF: ${{ github.ref }}
         run: |
+          # Bytes, not letters: in a UTF-8 locale [A-Za-z] can match
+          # accented letters.
+          export LC_ALL=C
           # Named specs never run on a promoted branch: the run would
           # cancel that branch's full run through the concurrency group.
           case "$REF" in
@@ -91,7 +110,30 @@ jobs:
             fi
             list="$list $spec"
           done
+          # Pages narrow named specs. Without them an empty specs is
+          # the full suite, which takes no pages.
+          pages=""
+          # shellcheck disable=SC2086
+          for page in $PAGES; do
+            if [ -z "$list" ]; then
+              echo "::error title=pages::pages needs specs: name the" \
+                "spec that walks them (-f specs=e2e/...)."
+              exit 1
+            fi
+            case "$page" in
+              *..*|*//*) bad=1 ;;
+              *) bad="" ;;
+            esac
+            if [ -n "$bad" ] || ! printf '%s' "$page" |
+              grep -Eq '^/[A-Za-z0-9._/-]*$'
+            then
+              echo "::error title=pages::Not a site path: name pages like /about/."
+              exit 1
+            fi
+            pages="$pages $page"
+          done
           echo "specs=${list# }" >> "$GITHUB_OUTPUT"
+          echo "pages=${pages# }" >> "$GITHUB_OUTPUT"
 
   full:
     needs: plan
@@ -109,6 +151,7 @@ jobs:
       shards: "[1]"
       total: 1
       args: ${{ needs.plan.outputs.specs }}
+      pages: ${{ needs.plan.outputs.pages }}
 
   # The gate jobs are named from the plan: a check run attaches to the
   # commit, so a named-specs run must never publish a passing check

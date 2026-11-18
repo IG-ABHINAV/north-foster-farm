@@ -117,22 +117,35 @@ and the run reports as `e2e-named`, never as the required `e2e`.
 Without `specs`, the run is the full suite twice plus the burn-in,
 about 18 jobs.
 
+To run one page, add `pages` to named specs: `gh workflow run e2e.yml
+--ref lane/<you> -f specs="e2e/keyboard.spec.mjs" -f pages="/about/"`,
+or `bin/nff e2e e2e/keyboard.spec.mjs /about/`. The run hands the
+pages to the specs as `E2E_PAGES`, so the keyboard walk tabs through
+`/about/` alone at both widths; its cart walk, account walk and Escape
+tests still run (#615, 2026-11-18). `pages` is a space-separated list
+of site paths, each matching `^/[A-Za-z0-9._/-]*$` with no `..` or
+`//`. The plan refuses a bad path, and pages without specs, and then
+runs no tests. `e2e-staging.yml` has no `pages` input.
+
 ### `bin/nff e2e` composes that dispatch (#610, 2026-11-18)
 
 Push the branch, then run `bin/nff e2e` in its worktree. It diffs the
 branch against `origin/next` (`--base=<ref>` for another), looks each
 changed path up in `e2e/dispatch.json`, prints the specs and pages it
-chose and the path behind each, dispatches `e2e.yml` with those specs,
-waits (one look every 3 minutes) and exits 0 on a pass. On a failure
+chose and the path behind each, dispatches `e2e.yml` with those specs
+and pages, waits (one look every 3 minutes) and exits 0 on a pass. On a failure
 it prints the run's link and one line per failing test: file, line,
 name, the site page when the name carries one, and the Playwright
 projects it failed on. Nothing about passing tests. `--dry-run` stops
 after the choice. Specs (`e2e/...`) or pages (`/...`) named on the
 command line skip the table, and `--all` takes every spec the table
 names, still as named specs. It never sends an empty `specs`, which
-would be the full suite. It prints pages without dispatching them
-until `e2e.yml` takes a `pages` input; `dispatchInputs` in
-`bin/e2e/dispatch.mjs` is the one place to add it.
+would be the full suite, nor pages without a spec. It sends pages only
+for a narrow choice: when the choice is everything (`--all`, or a
+shared or unmapped path), it sends none, so the walk covers the whole
+site. `dispatchInputs` in `bin/e2e/dispatch.mjs` is the one place the
+inputs are made (2026-11-18, #615: it printed pages without sending
+them until `e2e.yml` took them).
 
 The table maps globs to specs and pages. A path that matches a
 `shared` glob (the page frame, site-wide styles and scripts, data,

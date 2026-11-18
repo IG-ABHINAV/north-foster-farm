@@ -82,10 +82,13 @@ export const choose = (paths, table) => {
     };
 };
 
-// The workflow's inputs for a choice. The one place pages join the
-// dispatch once e2e.yml takes a pages input.
-export const dispatchInputs = ({ specs }) => ({ specs: specs.join(" ") });
-export const PAGES_DISPATCHED = false;
+// The workflow's inputs for a choice, the one place they are made.
+// Pages go only with a narrow choice: when the choice is everything,
+// none are sent, so the keyboard walk covers the whole site (#615).
+export const dispatchInputs = ({ all, specs, pages = [] }) => ({
+  specs: specs.join(" "),
+  ...(!all && pages.length ? { pages: pages.join(" ") } : {}),
+});
 
 // The test e2e.yml's plan job puts to a named spec: a plain path
 // under e2e/ ending in .spec.mjs, with no ".." or "//".
@@ -98,6 +101,20 @@ export const checkSpecs = (specs) => {
   return {
     specs: kept,
     bad: kept.filter((s) => !SPEC.test(s) || /\.\.|\/\//.test(s)),
+  };
+};
+
+// The test e2e.yml's plan job puts to a page: a plain site path, with
+// no ".." or "//".
+const PAGE = /^\/[A-Za-z0-9._/-]*$/;
+
+// The pages to send, blanks dropped, and the ones e2e.yml would refuse.
+export const checkPages = (pages) => {
+  const kept = pages.map((p) => String(p).trim()).filter(Boolean);
+
+  return {
+    pages: kept,
+    bad: kept.filter((p) => !PAGE.test(p) || /\.\.|\/\//.test(p)),
   };
 };
 
@@ -258,7 +275,7 @@ const printChoice = (choice, out, { base, how }) => {
       else if (r.why === "unknown") {
         out(`  ${path}: not in the table, so every spec`);
       } else {
-        out(`  ${path}: ${[...r.specs, ...r.pages].join(" ")
+        out(`  ${path}: ${[...r.specs, ...r.pages].map(printable).join(" ")
           || "no e2e"}`);
       }
     }
@@ -267,10 +284,13 @@ const printChoice = (choice, out, { base, how }) => {
         "path")} more the table maps`);
     }
   }
-  out(`Specs (${choice.specs.length}): ${choice.specs.join(" ") || "none"}`);
+  const specs = choice.specs.map(printable).join(" ");
+  const pages = choice.pages.map(printable).join(" ");
+
+  out(`Specs (${choice.specs.length}): ${specs || "none"}`);
   if (choice.pages.length) {
-    out(`Pages (${choice.pages.length}): ${choice.pages.join(" ")}${
-      PAGES_DISPATCHED ? "" : " (printed only: e2e.yml takes no pages yet)"}`);
+    out(`Pages (${choice.pages.length}): ${pages}${
+      choice.all ? " (not sent: every page is walked)" : ""}`);
   }
 };
 
@@ -353,11 +373,18 @@ export const e2eCommand = async (args, { flags = {}, out }, deps = {}) => {
     choice = choose(paths, d.table);
   }
   const { specs, bad } = checkSpecs(choice.specs);
+  const { pages, bad: badPages } = checkPages(choice.pages);
 
-  choice = { ...choice, specs };
+  choice = { ...choice, specs, pages };
   printChoice(choice, out, { base, how });
   if (bad.length) {
     out(`Not a spec path e2e.yml takes: ${bad.map(printable).join(" ")}`);
+
+    return 2;
+  }
+  if (badPages.length) {
+    out(`Not a site path e2e.yml takes: ${
+      badPages.map(printable).join(" ")}`);
 
     return 2;
   }
@@ -366,7 +393,7 @@ export const e2eCommand = async (args, { flags = {}, out }, deps = {}) => {
   // An empty specs input runs the full suite: never send one.
   if (!choice.specs.length) {
     out(how === "named"
-      ? "Name a spec too: e2e.yml runs specs, not pages, so far."
+      ? "Name a spec too: e2e.yml runs pages only within named specs."
       : "No spec to run.");
 
     return how === "named" ? 2 : 0;

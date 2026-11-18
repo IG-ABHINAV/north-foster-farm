@@ -37,7 +37,7 @@ chicken wage.
 
 The outdoor farmer's market season is winding down. The last day of the
 Scituate Rotary Farmers Market is this Saturday, September 27th. We may
-be wearing long johns, but the Foster Farmer's Market will be hanging
+be wearing long johns, but the Foster Farmers’ Market will be hanging
 on until October 26th. Even though the markets will close for the
 winter, our eggs are available all year long. We will be offering a
 weekly egg drop off at the site of the Scituate Rotary Farmers Market

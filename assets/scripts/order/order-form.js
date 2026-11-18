@@ -2092,7 +2092,7 @@ export class OrderForm {
   }
 
   // "10:00 – 11:00 AM, at the drop site" or "9:00 AM – 1:00 PM, at
-  // Foster Farmers Market": the occurrence's own hours and name, from
+  // Foster Farmers’ Market": the occurrence's own hours and name, from
   // the lists (one that has since left them is still remembered). A
   // draft saved before scheduled pickup (`scituate`) reads as the drop
   // site's did; an occurrence the page cannot name, as "the pickup you

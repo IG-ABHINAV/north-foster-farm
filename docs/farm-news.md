@@ -110,7 +110,7 @@ after the order's own emails. A failed send is logged as
 `news.welcome.failed` and leaves them on the list.
 
 It names how they opted in, from the last event in the log ("you
-signed up on our sheet at the Foster Farmers Market in July"), and
+signed up on our sheet at the Foster Farmers’ Market in July"), and
 the footer says it again. The market sheets (the old list's import)
 also hear that the list moved to a new provider, so a welcome
 reaching a long-standing customer makes sense.
@@ -128,7 +128,7 @@ and the sync then unsubscribes the contact in Resend.
 
 ```
 bin/nff --production audience import contacts.csv --date=2024-07-12 \
-  [--market="the Foster Farmers Market"] [--captured-by=James] \
+  [--market="the Foster Farmers’ Market"] [--captured-by=James] \
   [--evidence=foster-2024-07-12.pdf] [--dry-run] [--skip]
 ```
 

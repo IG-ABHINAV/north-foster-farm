@@ -1952,14 +1952,14 @@ Manual: runs `bin/nff` against staging.
   no confirmation round (#303).
 - **Setup:** A one-line CSV with a unique address;
   `bin/nff --staging audience import <csv> --date=2024-07-12
-  --market="the Foster Farmers Market"`.
+  --market="the Foster Farmers’ Market"`.
 - **Test:**
   1. Read the report, the record and the outbox.
 - **Assert:** The report lists the address under `imported`. The record
   has `marketing` true and `marketingSource` import; its last consent
   event is a `market-sheet` dated 2024-07-12 with the market as its
   detail. The outbox holds one message, the welcome, saying "you
-  signed up on our sign-up sheet at the Foster Farmers Market in July"
+  signed up on our sign-up sheet at the Foster Farmers’ Market in July"
   and that the list moved; no confirmation email.
 - **Teardown:** Delete the customer; the message removed.
 
@@ -2927,7 +2927,7 @@ Manual.
   2. The 6 PM "Tomorrow" report the day before.
   3. Open each order in the Square sandbox dashboard.
 - **Assert:** Slips: Type is the series' name ("Drop site",
-  "Foster Farmers Market"), never "Scheduled pickup"; Place is the
+  "Foster Farmers’ Market"), never "Scheduled pickup"; Place is the
   address; the Window is the occurrence's; orders of one occurrence
   sit together. The report: after Deliveries, one heading per
   occurrence, "<series name>, <day>, <place>, <hours> (n)", earliest

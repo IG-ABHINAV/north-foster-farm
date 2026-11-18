@@ -58,7 +58,7 @@ const METHODS = ["onfarm", "scheduled", "delivery"];
 
 const fail = (errors, extra = {}) => ({ ok: false, errors, ...extra });
 
-// "Foster Farmers Market, Shady Acres Diner, ..., Sun Oct 25 9:00 AM –
+// "Foster Farmers’ Market, Shady Acres Diner, ..., Sun Oct 25 9:00 AM –
 // 1:00 PM": what a fulfillment is, for the plan's before and after.
 const describe = (order) => {
   const f = order.fulfilment;

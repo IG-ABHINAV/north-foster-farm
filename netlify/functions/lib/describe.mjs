@@ -70,7 +70,7 @@ export const packetCounts = ({ slips = 0, revised = 0, cancelled = 0 }) => [
   cancelled && `${cancelled} canceled`,
 ].filter(Boolean).join(", ");
 
-// A market's place line opens with its name ("Foster Farmers Market,
+// A market's place line opens with its name ("Foster Farmers’ Market,
 // Shady Acres Diner, ..."); a note that already names the series wants
 // the rest.
 const withoutName = (place, name) => (place.startsWith(`${name}, `)

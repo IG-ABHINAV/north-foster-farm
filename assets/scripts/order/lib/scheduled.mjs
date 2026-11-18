@@ -23,7 +23,7 @@ export const placeNames = (choices) => [
   ...new Set(choices.filter((c) => c.name).map((c) => c.name)),
 ];
 
-// "Drop site, Foster Farmers Market, and Summer Pop-up" for the card's
+// "Drop site, Foster Farmers’ Market, and Summer Pop-up" for the card's
 // Where; beyond three, "and more".
 export const placesFact = (choices, shown = 3) => {
   const names = placeNames(choices);
@@ -120,7 +120,7 @@ export const addressLines = (loc) => {
 
 // A pickup's subtitle: the town, then the pickup's own name,
 // "North Scituate · Drop site", as on the Places cards. A name that
-// already says its town says it alone: "Foster Farmers Market" (#439).
+// already says its town says it alone: "Foster Farmers’ Market" (#439).
 export const pickupName = (town, name) => {
   if (town && name && ` ${name} `.includes(` ${town} `)) return name;
 

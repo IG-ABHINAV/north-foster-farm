@@ -2211,7 +2211,7 @@ const PACKET_KIND = {
   cancelled: "**CANCELED**",
 };
 
-// What a packet or report groups under: "Foster Farmers Market,
+// What a packet or report groups under: "Foster Farmers’ Market,
 // Sunday, October 25, Shady Acres Diner, 164 Danielson Pike, Foster,
 // 9:00 AM – 1:00 PM". The farm's own name for the series, never the
 // customer's "Scheduled pickup".

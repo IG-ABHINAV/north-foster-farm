@@ -23,7 +23,7 @@ A few springtime updates to share:
   but we’re looking forward to their delicious eggs.
 - **Farmers markets.** The 2025 farmers markets are just around the
   corner. The [Scituate Rotary Farmers Market][scituate] opens May
-  10th, and the [Foster Farmers' Market][foster] opens June 1st. We’re
+  10th, and the [Foster Farmers’ Market][foster] opens June 1st. We’re
   hopeful that our new layers will supply enough eggs to allow us to
   support customers at both locations.
 - **Non-GMO.** In our last update, we noted that based on requests and

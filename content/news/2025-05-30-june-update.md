@@ -14,7 +14,7 @@ find us on the weekends:
   **When:** every Saturday\
   **Time:** 9:00 AM to 12:00 PM\
   **Where:** 46 Institute Lane, North Scituate, RI 02857
-- **[Foster Farmers' Market][foster]**\
+- **[Foster Farmers’ Market][foster]**\
   **When:** every Sunday\
   **Time:** 9:00 AM to 12:30 PM\
   **Where:** 164 Danielson Pike, Foster, RI 02825

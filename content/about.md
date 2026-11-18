@@ -70,7 +70,7 @@ our eggs for years or you're just passing by, we hope you'll stop by
 our table the next time you get the chance.
 
 {{< markets photo="images/chicken-suit.jpg"
-  alt="Someone in a giant chicken suit behind our table at the Foster Farmers Market" />}}
+  alt="Someone in a giant chicken suit behind our table at the Foster Farmers’ Market" />}}
 
 Any week of the year, [order online](/order) for delivery, on-farm
 pickup or [pickup at one of our drop sites](/delivery-policy/#pickup-days).

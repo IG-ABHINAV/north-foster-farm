@@ -194,7 +194,7 @@ const WELCOMES = [
   ["reinvite-confirmation", "the confirmation link sent 2026-10-21",
     "after the re-invite", "Not sent since #303: the old list is " +
       "imported. Kept for a link mailed before"],
-  ["market-sheet", "the Foster Farmers Market", "from a market sheet",
+  ["market-sheet", "the Foster Farmers’ Market", "from a market sheet",
     "The old list's paper sheets are imported (bin/nff audience import)"],
   ["in-person", "", "for an in-person opt-in",
     "Someone asked in person to be added (recorded later, #267)"],

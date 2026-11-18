@@ -70,7 +70,7 @@ const hour12 = (h) => meridiem(((h + 11) % 12) + 1, h < 12 ? "AM" : "PM");
 let dropSeries = "";
 
 // "10:00 – 11:00 AM, at the drop site" or "9:00 AM – 1:00 PM, at
-// Foster Farmers Market": the window, then the place, as the order
+// Foster Farmers’ Market": the window, then the place, as the order
 // page reads it.
 const at = ({ window, name, series }) => [
   window, `at ${series && series === dropSeries ? "the drop site" : name}`,

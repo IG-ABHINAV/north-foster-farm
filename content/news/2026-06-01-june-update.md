@@ -44,7 +44,7 @@ to stop by, say hello, and see what we’ve got.
   - Saturdays
   - 9:00 AM - 12:00 PM
   - 46 Institute Lane, North Scituate, RI
-- **[Foster Farmers Market][foster]:**
+- **[Foster Farmers’ Market][foster]:**
   - Sundays
   - 9:00 AM - 1:00 PM
   - Shady Acres Diner, 164 Danielson Pike, Foster, RI

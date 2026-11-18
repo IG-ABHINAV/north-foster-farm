@@ -22,6 +22,7 @@ import {
   movedDelivery, orderCancelled, orderChanged, orderConfirmed, paymentPhrase,
   summaryLine,
 } from "../netlify/functions/lib/templates.mjs";
+import { FOSTER_NAME } from "./foster-name.mjs";
 
 const order = (method = "delivery") => ({
   id: "NFF-2610-ABCD",
@@ -296,7 +297,7 @@ describe("scheduled pickup emails", () => {
       has(m.text, "Order type: Pickup days");
       has(m.text, "- When: Sunday, October 25, between 9:00 AM and " +
         "1:00 PM");
-      has(m.text, "- Where: Foster Farmers Market, Shady Acres Diner, " +
+      has(m.text, `- Where: ${FOSTER_NAME}, Shady Acres Diner, ` +
         "164 Danielson Pike, Foster");
     });
 
@@ -337,7 +338,7 @@ describe("scheduled pickup emails", () => {
 
     has(m.text, "Before: 46 Institute Lane");
     has(m.text, "Saturday, October 17, between 10:00 and 11:00 AM");
-    has(m.text, "- Where: Foster Farmers Market, Shady Acres Diner");
+    has(m.text, `- Where: ${FOSTER_NAME}, Shady Acres Diner`);
   });
 
   it("names both places in the farm's notice of a move", async () => {
@@ -347,7 +348,7 @@ describe("scheduled pickup emails", () => {
     });
 
     has(m.text, "Was: Drop site, 46 Institute Lane");
-    has(m.text, "Now: Foster Farmers Market, Shady Acres Diner");
+    has(m.text, `Now: ${FOSTER_NAME}, Shady Acres Diner`);
   });
 
   it("groups a packet by occurrence, not by a fixed heading", async () => {
@@ -358,7 +359,7 @@ describe("scheduled pickup emails", () => {
     ], { day: "2026-10-06", slips: 2, links });
 
     has(m.text, "\nDrop site, Saturday, October 17, 46 Institute Lane");
-    has(m.text, "\nFoster Farmers Market, Sunday, October 25, Shady Acres");
+    has(m.text, `\n${FOSTER_NAME}, Sunday, October 25, Shady Acres`);
     assert.doesNotMatch(m.text, /Market pickup/);
   });
 });

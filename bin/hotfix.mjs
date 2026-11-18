@@ -24,19 +24,26 @@
 // `start` and step 1 push `next` (and `start` `staging`) to commits that
 // are not fast-forwards, which ruleset 25361439 ("no force-push or
 // deletion") forbids. Each opens the same window (coordinator,
-// 2026-11-18): it saves the ruleset, narrows it to `main` alone, pushes,
-// restores the saved copy in a finally and reads it back. A read-back
-// that differs is an error naming the ruleset. No write drops `main` or
-// either rule, or adds a bypass actor. Step 2's pushes are fast-forwards
-// and open no window. The "linear history" ruleset (25898866) is never
-// written: a rebuilt branch holds no merge commit.
+// 2026-11-18): it refuses unless the ruleset covers exactly `next`,
+// `staging` and `main`, writes the saved copy to a file in the git
+// common directory, narrows the ruleset to `main` alone, pushes,
+// restores the saved copy in a finally (three tries) and reads it back.
+// SIGINT, SIGTERM and SIGHUP restore it too before the process exits.
+// The file goes only once the read-back matches; a read-back that
+// differs is an error naming the ruleset. Every run first refuses while
+// that file is left or the live ruleset is narrowed, and never restores
+// it by itself. No write drops `main` or either rule, or adds a bypass
+// actor. Step 2's pushes are fast-forwards and open no window. The
+// "linear history" ruleset (25898866) is never written: a rebuilt
+// branch holds no merge commit.
 //
-// The test of this contract is test/hotfix.test.mjs. Every git command
-// goes through `deps.git` and every GitHub call through `deps.api`, so
-// the tests run real git against throwaway repositories.
+// The tests of this contract are test/hotfix.test.mjs and
+// test/hotfix-round3.test.mjs (the security review of #631). Every git
+// command goes through `deps.git` and every GitHub call through
+// `deps.api`, so the tests run real git against throwaway repositories.
 
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { promisify } from "node:util";
@@ -62,6 +69,19 @@ export const REBUILD = {
 };
 const FROM_KEY = "nff-hotfix.from";
 
+// The saved copy of the ruleset while the window is open, in the git
+// common directory so every worktree of the checkout finds it.
+export const LEFTOVER = `nff-hotfix-ruleset-${RULESET}.json`;
+// What ruleset 25361439 covers when whole.
+export const COVERED = ["next", "staging", "main"];
+// The only flags the commands take.
+export const FLAGS = ["dry-run", "yes"];
+// The waits between the restore's three tries, in milliseconds.
+export const BACKOFF = [1000, 2000];
+// The signals that restore the ruleset before the process exits, with
+// the exit code each leaves.
+export const SIGNALS = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+
 export const USAGE = `
   bin/nff hotfix start [--yes] [--dry-run]
                                       when staging holds work not fit to
@@ -79,8 +99,11 @@ export const USAGE = `
                                       the hotfix and next, staging and
                                       main are one commit: rebuild the
                                       placeholders on main in this
-                                      checkout, check no change of
-                                      theirs was lost, force-push next
+                                      checkout, check path by path that
+                                      no change of theirs or of the
+                                      hotfix was lost, ask about the
+                                      paths both changed (even with
+                                      --yes), force-push next
                                       to the rebuilt staging and keep
                                       the rebuilt next as
                                       hotfix/rebuilt. On a conflict it
@@ -101,12 +124,22 @@ const realGit = async (args) => {
     return (await execute("git", args, { maxBuffer: 64 * 1024 * 1024 }))
       .stdout.trim();
   } catch (error) {
-    throw Object.assign(new Error(`git ${args.join(" ")}: ${
-      String(error.stderr || error.message).trim()}`), {
+    throw Object.assign(new Error(printable(`git ${args.join(" ")}: ${
+      String(error.stderr || error.message).trim()}`)), {
       stdout: error.stdout, stderr: error.stderr,
     });
   }
 };
+
+const realSignals = {
+  on: (signal, handler) => process.on(signal, handler),
+  off: (signal, handler) => process.off(signal, handler),
+  exit: (code) => process.exit(code),
+};
+
+const realSleep = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
 
 const realConfirm = async (question) => {
   if (!process.stdin.isTTY) return false;
@@ -120,7 +153,12 @@ const realConfirm = async (question) => {
   }
 };
 
-export const realDeps = { git: realGit, api: ghApi, confirm: realConfirm };
+// `sleep` and `signals` are the implementer's own seams, for its tests
+// of the restore's retries and the signal handlers.
+export const realDeps = {
+  git: realGit, api: ghApi, confirm: realConfirm, sleep: realSleep,
+  signals: realSignals,
+};
 
 const short = (sha) => printable(String(sha).slice(0, 7));
 // "a", "a and b", "a, b and c".
@@ -164,10 +202,6 @@ const dirty = async (git) => (await git(["status", "--porcelain"])) !== "";
 const subjectOf = async (git, sha) =>
   printable(await git(["log", "-1", "--format=%s", sha]));
 
-// The force-push window. `push()` runs while ruleset 25361439 covers
-// `main` alone; the saved copy goes back after it whatever happens and
-// is read back. -> { pushError, rulesetError }, neither thrown here.
-
 // The parts of a ruleset that say what it protects, and all a PUT
 // sends.
 const guards = (r) => ({
@@ -196,18 +230,179 @@ export const differences = (saved, back) => Object.keys(guards(saved))
   .map((key) => `${key} saved ${JSON.stringify(guards(saved)[key])}, `
     + `read back ${JSON.stringify(guards(back)[key])}`);
 
-const window = async (api, push) => {
-  const saved = await api(RULESET_PATH);
-  const include = saved?.conditions?.ref_name?.include ?? [];
+const included = (r) => r?.conditions?.ref_name?.include ?? [];
+const branchName = (ref) => printable(String(ref)
+  .replace(/^refs\/heads\//, ""));
 
-  if (!include.includes("refs/heads/main")
-    || !ruleTypes(saved).includes("non_fast_forward")
-    || !ruleTypes(saved).includes("deletion")) {
-    throw new Error(`Refused: ruleset ${RULESET} does not cover main with `
-      + "its no force-push and no deletion rules, so it is not the one "
-      + "this command knows how to narrow. Nothing is pushed.");
+// The branches a ruleset covers, as a sentence: "main", "next, staging
+// and main", or "nothing".
+const covers = (r) => listed(included(r).map(branchName)) || "nothing";
+
+// Whether a ruleset is the whole 25361439: exactly next, staging and
+// main, with both rules. -> undefined, or why it is not.
+export const notWhole = (r) => {
+  const include = included(r);
+  const want = COVERED.map((name) => `refs/heads/${name}`);
+
+  if (include.length !== want.length
+    || !want.every((ref) => include.includes(ref))) {
+    return `it covers ${covers(r)}, not exactly ${listed(COVERED)}`;
+  }
+  if (!ruleTypes(r).includes("non_fast_forward")
+    || !ruleTypes(r).includes("deletion")) {
+    return "it lacks its no force-push or no deletion rule";
   }
 
+  return undefined;
+};
+
+// Narrowed, as a window leaves it: next or staging gone from include.
+const isNarrowed = (r) => !included(r).includes("refs/heads/next")
+  || !included(r).includes("refs/heads/staging");
+
+export const leftoverPath = async (git) => join(await git(["rev-parse",
+  "--path-format=absolute", "--git-common-dir"]), LEFTOVER);
+
+// The command that puts the saved copy back, runnable as printed: the
+// path is quoted for the shell when it needs to be.
+export const restoreCommand = (file) => {
+  const path = printable(file);
+  const quoted = /^[\w@%+=:,./-]+$/.test(path)
+    ? path : `'${path.replaceAll("'", "'\\''")}'`;
+
+  return `gh api -X PUT ${RULESET_PATH} --input ${quoted}`;
+};
+
+// How to put the saved copy back by hand, as a sentence.
+const howToRestore = (file) => `Restore it with \`${restoreCommand(file)}\`, `
+  + `check that \`gh api ${RULESET_PATH}\` reads back the same, then `
+  + "delete the file.";
+
+const tryApi = async (api, path) => {
+  try {
+    return await api(path);
+  } catch {
+    return undefined;
+  }
+};
+
+// Every run's first check (round 3, B and A): no saved copy left by a
+// run stopped inside the window, and the live ruleset whole. Refuses
+// before anything is pushed, written or rebuilt, and never restores by
+// itself. -> the saved copy's path.
+const preflight = async ({ git, api }) => {
+  const file = await leftoverPath(git);
+  const left = existsSync(file);
+  const live = left
+    ? await tryApi(api, RULESET_PATH) : await api(RULESET_PATH);
+  const where = `the saved copy is in ${printable(file)}`;
+
+  if (left && !live) {
+    throw new Error("Refused: a run stopped inside the force-push window "
+      + `left ${where}, and ruleset ${RULESET} could not be read to see `
+      + `whether it is restored. If \`gh api ${RULESET_PATH}\` shows it `
+      + `covers ${listed(COVERED)}, there is nothing to restore: delete `
+      + `the file. If not: ${howToRestore(file)} Nothing changed.`);
+  }
+  if (left && !notWhole(live)) {
+    throw new Error("Refused: a run stopped inside the force-push window "
+      + `left ${where}, but ruleset ${RULESET} is whole: it covers `
+      + `${listed(COVERED)}, so there is nothing to restore. Deleting the `
+      + "file is the only step. Nothing changed.");
+  }
+  if (left) {
+    throw new Error(`Refused: ruleset ${RULESET} is not as saved (${
+      notWhole(live)}), and a run stopped inside the force-push window `
+      + `left ${where}. ${howToRestore(file)} Nothing changed.`);
+  }
+  if (isNarrowed(live)) {
+    throw new Error(`Refused: ruleset ${RULESET} covers only ${
+      covers(live)}, so next and staging are open to force-pushes and `
+      + "deletion, as a run stopped inside the force-push window leaves "
+      + "it. No saved copy is in this checkout, so that run was elsewhere: "
+      + "restore it from there, or in GitHub (Settings, Rules, Rulesets) "
+      + `so it covers ${listed(COVERED)}, then run this again. Nothing `
+      + "changed.");
+  }
+
+  const why = notWhole(live);
+
+  if (why) {
+    throw new Error(`Refused: ruleset ${RULESET} is not the one this `
+      + `command knows how to narrow: ${why}. Nothing changed.`);
+  }
+
+  return file;
+};
+
+// Puts the saved copy back: three tries, each read back, the file
+// deleted once one matches. -> undefined, or the Error to raise.
+const restoreSaved = async ({ api, sleep }, body, file) => {
+  let last;
+
+  for (let attempt = 0; attempt <= BACKOFF.length; attempt += 1) {
+    if (attempt) await sleep(BACKOFF[attempt - 1]);
+    try {
+      await api(RULESET_PATH, { method: "PUT", body });
+
+      const diff = differences(body, await api(RULESET_PATH));
+
+      if (!diff.length) {
+        rmSync(file, { force: true });
+
+        return undefined;
+      }
+      last = `it reads back different: ${diff.join("; ")}`;
+    } catch (error) {
+      last = error.message;
+    }
+  }
+
+  return new Error(`Ruleset ${RULESET} was not restored after `
+    + `${BACKOFF.length + 1} tries (${printable(last)}), so next and `
+    + `staging may be open to force-pushes. The saved copy is in `
+    + `${printable(file)}. ${howToRestore(file)}`);
+};
+
+// The force-push window. `push()` runs while ruleset 25361439 covers
+// `main` alone; the saved copy is written to `file` first, goes back
+// after the push whatever happens, on a signal too, and is read back.
+// Throws only before it narrows anything (the ruleset not whole, the
+// file already there). -> { pushError, rulesetError }.
+const window = async (deps, file, push) => {
+  const { api, signals, out } = deps;
+  const saved = await api(RULESET_PATH);
+  const why = notWhole(saved);
+
+  if (why) {
+    throw new Error(`Refused: ruleset ${RULESET} is not the one this command `
+      + `knows how to narrow: ${why}. Nothing is pushed.`);
+  }
+
+  const body = guards(saved);
+
+  // "wx": a second run at once finds the file and stops here.
+  writeFileSync(file, `${JSON.stringify(body, null, 2)}\n`,
+    { flag: "wx", mode: 0o600 });
+
+  let restoring;
+  const restore = () => {
+    restoring ??= restoreSaved(deps, body, file);
+
+    return restoring;
+  };
+  const handlers = Object.entries(SIGNALS).map(([signal, code]) => {
+    const handler = () => {
+      restore().then((error) => {
+        out(error ? printable(error.message) : `Stopped by ${signal}: `
+          + `ruleset ${RULESET} is restored and read back.`);
+      }).finally(() => signals.exit(code));
+    };
+
+    signals.on(signal, handler);
+
+    return [signal, handler];
+  });
   let pushError;
   let rulesetError;
 
@@ -217,23 +412,8 @@ const window = async (api, push) => {
   } catch (error) {
     pushError = error;
   } finally {
-    try {
-      await api(RULESET_PATH, { method: "PUT", body: guards(saved) });
-
-      const diff = differences(saved, await api(RULESET_PATH));
-
-      if (diff.length) {
-        rulesetError = new Error(`Ruleset ${RULESET} does not match the `
-          + `copy saved before the push: ${printable(diff.join("; "))}. `
-          + `Put it back by hand: gh api -X PUT ${RULESET_PATH} --input `
-          + `with ${printable(JSON.stringify(guards(saved)))}`);
-      }
-    } catch (error) {
-      rulesetError = new Error(`Ruleset ${RULESET} was not restored after `
-        + `the push: ${printable(error.message)}. Put it back by hand: `
-        + `gh api -X PUT ${RULESET_PATH} --input with `
-        + `${printable(JSON.stringify(guards(saved)))}`);
-    }
+    rulesetError = await restore();
+    for (const [signal, handler] of handlers) signals.off(signal, handler);
   }
 
   return { pushError, rulesetError };
@@ -285,7 +465,56 @@ const QUESTION = (main) => `The staging site will show production's `
   + `content (main at ${short(main)}) from now until the second \`bin/nff `
   + "hotfix finish`. Start the hotfix?";
 
-const start = async ({ dryRun, yes, out }, { git, api, confirm }) => {
+// Deletes the placeholders, leased on the heads they were pushed at, so
+// a branch someone moved since is never deleted.
+const dropPlaceholders = async ({ git, out }, was) => {
+  try {
+    await git(["push", "--atomic",
+      `--force-with-lease=refs/heads/${PLACEHOLDER.next}:${was.next}`,
+      `--force-with-lease=refs/heads/${PLACEHOLDER.staging}:${was.staging}`,
+      "origin", "--delete", `refs/heads/${PLACEHOLDER.next}`,
+      `refs/heads/${PLACEHOLDER.staging}`]);
+    out(`Deleted ${PLACEHOLDER.next} and ${PLACEHOLDER.staging} again, `
+      + "since next and staging did not move.");
+  } catch (error) {
+    out(`${PLACEHOLDER.next} and ${PLACEHOLDER.staging} stay on origin: `
+      + `deleting them failed (${said(error)}). next and staging did not `
+      + "move, so delete both by hand before the next hotfix start.");
+  }
+};
+
+// After start's push of next and staging failed: origin may have taken
+// it all the same (a dropped connection). Delete the placeholders only
+// if both branches are still where they were; else keep them, since
+// they are then the only refs to the unreleased work (round 3, D).
+const afterFailedPush = async (deps, was) => {
+  const { git, out } = deps;
+  let now;
+
+  try {
+    now = await fetchHeads(git);
+  } catch (error) {
+    out(`${PLACEHOLDER.next} and ${PLACEHOLDER.staging} stay on origin: `
+      + `the fetch to see whether next and staging moved failed `
+      + `(${said(error)}). Check origin before you delete them.`);
+
+    return;
+  }
+  if (now.next === was.next && now.staging === was.staging) {
+    await dropPlaceholders(deps, was);
+
+    return;
+  }
+  out(`${PLACEHOLDER.next} (${short(was.next)}) and ${PLACEHOLDER.staging} `
+    + `(${short(was.staging)}) stay on origin: the push reported a failure, `
+    + `but next is now ${short(now.next ?? "gone")} and staging `
+    + `${short(now.staging ?? "gone")}, so origin took at least part of it `
+    + "and the placeholders are kept as the only refs to the unreleased "
+    + "work. Check origin, then go on with the hotfix as start would have.");
+};
+
+const start = async ({ dryRun, yes, out, file }, deps) => {
+  const { git, confirm } = deps;
   const heads = await fetchHeads(git);
   const { main, next, staging } = heads;
 
@@ -347,15 +576,19 @@ const start = async ({ dryRun, yes, out }, { git, api, confirm }) => {
   out(`Kept next (${short(next)}) as ${PLACEHOLDER.next} and staging `
     + `(${short(staging)}) as ${PLACEHOLDER.staging}.`);
 
-  const result = await window(api,
-    () => forcePush(git, { next, staging }, { next: main, staging: main }));
+  let result;
+
+  try {
+    result = await window(deps, file,
+      () => forcePush(git, { next, staging }, { next: main, staging: main }));
+  } catch (error) {
+    // The window refused before it narrowed anything: nothing moved.
+    await dropPlaceholders(deps, { next, staging });
+    throw error;
+  }
 
   if (result.pushError) {
-    // Nothing moved, so the placeholders would only block a new start.
-    await tryGit(git, ["push", "--atomic", "origin", "--delete",
-      `refs/heads/${PLACEHOLDER.next}`, `refs/heads/${PLACEHOLDER.staging}`]);
-    out(`Deleted ${PLACEHOLDER.next} and ${PLACEHOLDER.staging} again, `
-      + "since next and staging did not move.");
+    await afterFailedPush(deps, { next, staging });
   } else {
     out(`next and staging are now at main's commit ${short(main)}, inside `
       + `the window: ruleset ${RULESET} was narrowed to main for the push `
@@ -434,74 +667,12 @@ const rebase = async (git, args) => {
 
 const REBASE_FLAGS = ["--no-rebase-merges", "--empty=drop", "--quiet"];
 
-// The lines of a diff each file gains, by the file's path.
-// A path git quoted C-style ("caf\303\251.txt"): its escapes are the
-// bytes of UTF-8.
-const ESCAPES = {
-  a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, "\"": 34, "\\": 92,
-};
-
-const unquote = (path) => {
-  if (!path.startsWith("\"")) return path;
-
-  const body = path.slice(1, -1);
-  const bytes = [];
-
-  for (let i = 0; i < body.length; i += 1) {
-    if (body[i] !== "\\") {
-      bytes.push(...Buffer.from(body[i]));
-    } else if (/[0-7]/.test(body[i + 1])) {
-      bytes.push(parseInt(body.slice(i + 1, i + 4), 8));
-      i += 3;
-    } else {
-      bytes.push(ESCAPES[body[i + 1]] ?? body.charCodeAt(i + 1));
-      i += 1;
-    }
-  }
-
-  return Buffer.from(bytes).toString("utf8");
-};
-
-export const addedLines = (diff) => {
-  const files = new Map();
-  let file;
-
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("diff --git ")) {
-      file = undefined;
-    } else if (line.startsWith("+++ ")) {
-      const path = line.slice(4);
-
-      file = path === "/dev/null" ? undefined : unquote(path).slice(2);
-      if (file && !files.has(file)) files.set(file, { lines: [] });
-    } else if (line.startsWith("Binary files ")) {
-      const m = line.match(/ and (.+) differ$/);
-
-      if (m && m[1] !== "/dev/null") {
-        file = unquote(m[1]).slice(2);
-        files.set(file, { lines: [], binary: true });
-      }
-    } else if (file && line.startsWith("+")) {
-      files.get(file).lines.push(line.slice(1));
-    }
-  }
-
-  return files;
-};
-
-// A file's lines at a commit, each trimmed, or null when it has none.
-const lineSet = async (git, cache, rev, path) => {
-  const key = `${rev}:${path}`;
-
-  if (!cache.has(key)) {
-    const text = await tryGit(git, ["show", "--no-textconv", key]);
-
-    cache.set(key, text === undefined
-      ? null : new Set(text.split("\n").map((l) => l.trim())));
-  }
-
-  return cache.get(key);
-};
+// The paths whose tree entries (mode and content, or absent) differ
+// between two commits. Plumbing, so no diff setting of the checkout
+// (whitespace, textconv, submodules) hides a change.
+const changedPaths = async (git, a, b) => new Set((await git(["diff-tree",
+  "-r", "-z", "--no-renames", "--name-only", a, b])).split("\0")
+  .filter(Boolean));
 
 const FORMAT = "--format=%H%x1f%P%x1f%ae%x1f%ad%x1f%s";
 
@@ -515,67 +686,71 @@ const commitsIn = async (git, range) => (await git(["log", "--reverse",
   };
 });
 
-// What the rebuilt branches lost of the placeholders, and what git
-// dropped. `p` holds the placeholders' and the rebuilt branches' heads,
-// old main and main now. -> { missing, dropped, flattened }.
-export const audit = async (git, p) => {
-  const commits = await commitsIn(git, `${p.oldMain}..${p.hn}`);
-  const onStaging = new Set((await git(["rev-list",
-    `${p.oldMain}..${p.hs}`])).split("\n").filter(Boolean));
-  const copies = new Set((await git(["log", "--right-only", "--cherry-mark",
-    "--no-merges", "--format=%m %H", `${p.main}...${p.hn}`]))
-    .split("\n").filter((l) => l.startsWith("= ")).map((l) => l.slice(2)));
-  const rebuilt = new Set((await commitsIn(git, `${p.main}..${p.next}`))
-    .map((c) => c.key));
-  const cache = new Map();
-  const missing = [];
-  const dropped = [];
-  const flattened = [];
+// The commits of `range` with a patch-id copy on `main`.
+const copiesOnMain = async (git, main, head) => new Set((await git(["log",
+  "--right-only", "--cherry-mark", "--no-merges", "--format=%m %H",
+  `${main}...${head}`])).split("\n").filter((l) => l.startsWith("= "))
+  .map((l) => l.slice(2)));
 
-  for (const c of commits) {
-    const subject = printable(c.subject);
+// The paths the hotfix (old main to main) and a placeholder (old main
+// to its head) both touched.
+export const bothTouched = async (git, oldMain, main, head) => {
+  const hot = await changedPaths(git, oldMain, main);
 
-    if (c.parents.length > 1) {
-      flattened.push(`${short(c.sha)} ${subject}`);
-    } else if (copies.has(c.sha)) {
-      dropped.push(`${short(c.sha)} ${subject}`);
-      continue;
-    }
+  return [...await changedPaths(git, oldMain, head)]
+    .filter((path) => hot.has(path)).sort();
+};
 
-    const staged = onStaging.has(c.sha);
-    const head = staged ? p.hs : p.hn;
-    const now = staged ? p.staging : p.next;
-    const files = addedLines(await git(["diff", "--no-color", "--no-ext-diff",
-      "--no-textconv", "--no-renames", "-U0", c.parents[0], c.sha]));
-    const lost = [];
+// Criterion 6 as round 3's C states it: each rebuilt branch (R) against
+// its placeholder (H), with old main (O) and main (M), compared path by
+// path. A path the hotfix did not touch (O = M) must be in R as in H; a
+// path no placeholder commit touched (O = H) must be in R as in M; a
+// path both touched where R differs from H or M is to be confirmed.
+// `p` holds the placeholders' and the rebuilt branches' heads, old main
+// and main now. -> { refused, confirm, dropped, emptied, flattened }:
+// refused [{ branch, path, why }], confirm [{ branch, head, paths }].
+export const compare = async (git, p) => {
+  const hot = await changedPaths(git, p.oldMain, p.main);
+  const refused = [];
+  const confirm = [];
 
-    for (const [path, change] of files) {
-      const kept = await lineSet(git, cache, head, path);
-      const there = await lineSet(git, cache, now, path);
+  for (const [branch, head, rebuilt] of [["staging", p.hs, p.staging],
+    ["next", p.hn, p.next]]) {
+    const placeholder = PLACEHOLDER[branch];
+    const own = await changedPaths(git, p.oldMain, head);
+    const fromHead = await changedPaths(git, head, rebuilt);
+    const fromMain = await changedPaths(git, p.main, rebuilt);
+    const paths = [];
 
-      if (!kept) continue;
-      if (!there) {
-        lost.push(`${printable(path)} is gone`);
-        continue;
-      }
-      if (change.binary) continue;
-      for (const line of change.lines) {
-        const text = line.trim();
-
-        if (text && kept.has(text) && !there.has(text)) {
-          lost.push(`${printable(path)}: ${JSON.stringify(printable(text))}`);
-        }
+    for (const path of [...new Set([...fromHead, ...fromMain])].sort()) {
+      if (!hot.has(path) && fromHead.has(path)) {
+        refused.push({ branch, path, why: "the hotfix did not touch it, so "
+          + `it must be as ${placeholder} has it` });
+      } else if (!own.has(path) && fromMain.has(path)) {
+        refused.push({ branch, path, why: "no commit of "
+          + `${placeholder} touched it, so it must be as main has it` });
+      } else if (hot.has(path) && own.has(path)) {
+        paths.push(path);
       }
     }
-    if (lost.length) {
-      missing.push({ commit: `${short(c.sha)} ${subject}`, lost,
-        branch: staged ? "staging" : "next" });
-    } else if (c.parents.length === 1 && !rebuilt.has(c.key)) {
-      dropped.push(`${short(c.sha)} ${subject}`);
-    }
+    if (paths.length) confirm.push({ branch, head, rebuilt, paths });
   }
 
-  return { missing, dropped, flattened };
+  // What the rebuild left out of the placeholders: a patch-id copy of a
+  // commit on main, or a commit the rebuild emptied.
+  const commits = await commitsIn(git, `${p.oldMain}..${p.hn}`);
+  const copies = await copiesOnMain(git, p.main, p.hn);
+  const rebuilt = new Set((await commitsIn(git, `${p.main}..${p.next}`))
+    .map((c) => c.key));
+  const named = (c) => `${short(c.sha)} ${printable(c.subject)}`;
+
+  return {
+    refused, confirm,
+    dropped: commits.filter((c) => copies.has(c.sha)).map(named),
+    emptied: commits.filter((c) => c.parents.length === 1
+      && !copies.has(c.sha) && !rebuilt.has(c.key)).map(named),
+    flattened: commits.filter((c) => c.parents.length > 1).map(named),
+  };
 };
 
 // Where the checkout was before finish began, kept until it is done.
@@ -604,7 +779,8 @@ const putBack = async (git) => {
 
 // Step 1 of `finish`: rebuild, check, then `next` to the rebuilt staging
 // and the rebuilt next to `hotfix/rebuilt`.
-const finishFirst = async ({ dryRun, out }, { git, api }, heads) => {
+const finishFirst = async ({ dryRun, out, file }, deps, heads) => {
+  const { git, confirm } = deps;
   const { main } = heads;
   const hn = heads[PLACEHOLDER.next];
   const hs = heads[PLACEHOLDER.staging];
@@ -660,8 +836,17 @@ const finishFirst = async ({ dryRun, out }, { git, api }, heads) => {
       out(`  flatten the merge commit ${short(c.sha)} `
         + `${printable(c.subject)}`);
     }
-    out("  refuse unless the rebuilt next and staging hold every line the "
-      + "placeholders added");
+    const both = [...new Set([
+      ...await bothTouched(git, oldMain, main, hs),
+      ...await bothTouched(git, oldMain, main, hn),
+    ])].sort();
+
+    out("  refuse unless, path by path, the rebuilt next and staging are "
+      + "as the placeholders had them where the hotfix touched nothing, "
+      + "and as main has them where the placeholders touched nothing");
+    out(`  show and ask you to confirm the paths the hotfix and the `
+      + `placeholders both touched, even with --yes: ${
+        both.map(printable).join(", ") || "none"}`);
     out(`  narrow ruleset ${RULESET} to main, force-push next to the `
       + `rebuilt staging and push the rebuilt next as ${REBUILT}, restore `
       + "the ruleset and read it back");
@@ -720,22 +905,44 @@ const finishFirst = async ({ dryRun, out }, { git, api }, heads) => {
       + "linear history rule. Nothing is pushed; run it again.");
   }
 
-  const found = await audit(git, {
+  const found = await compare(git, {
     oldMain, main, hn, hs, next: rn, staging: rs,
   });
 
+  if (found.refused.length) {
+    await putBack(git);
+    throw new Error("Refused: the rebuild changed what it must keep. "
+      + `${found.refused.map((x) => `In the rebuilt ${x.branch}, ${
+        printable(x.path)}: ${x.why}.`).join(" ")} Nothing is pushed and `
+      + "the placeholders stay. Run bin/nff hotfix finish again and keep "
+      + "those changes when you resolve the conflict.");
+  }
   for (const c of found.dropped) out(`Dropped, main already has it: ${c}`);
+  for (const c of found.emptied) {
+    out(`Emptied by the rebuild, and not a copy of a commit on main: ${c}. `
+      + "Check its change is meant to go.");
+  }
   for (const c of found.flattened) {
     out(`Flattened the merge commit ${c}: its commits are replayed one `
       + "by one.");
   }
-  if (found.missing.length) {
-    await putBack(git);
-    throw new Error("Refused: the rebuilt branches lack changes the "
-      + `placeholders made. ${found.missing.map((m) => `The rebuilt ${
-        m.branch} lacks what ${m.commit} added: ${m.lost.join("; ")}.`)
-        .join(" ")} Nothing is pushed and the placeholders stay. Run it `
-      + "again and keep those lines when you resolve the conflict.");
+  if (found.confirm.length) {
+    const paths = [...new Set(found.confirm.flatMap((x) => x.paths))].sort();
+
+    for (const x of found.confirm) {
+      out(`How the rebuilt ${x.branch} differs from ${PLACEHOLDER[x.branch]}`
+        + " where the hotfix and the placeholders both made changes:");
+      for (const line of (await git(["--literal-pathspecs", "diff",
+        "--no-color", "--no-ext-diff", "--no-textconv", x.head, x.rebuilt,
+        "--", ...x.paths])).split("\n")) out(`  ${printable(line)}`);
+    }
+    if (!await confirm(`The hotfix and the placeholders both changed ${
+      listed(paths.map(printable))}. Is the rebuild shown above right?`)) {
+      await putBack(git);
+      throw new Error(`Refused: not confirmed. Nothing is pushed and the `
+        + "placeholders stay. Run bin/nff hotfix finish again and resolve "
+        + "the rebuild as it should be.");
+    }
   }
 
   // One atomic push: `next` to the rebuilt staging, forced and leased on
@@ -751,7 +958,7 @@ const finishFirst = async ({ dryRun, out }, { git, api }, heads) => {
       result = { pushError: error };
     }
   } else {
-    result = await window(api, () => git(["push", "--atomic",
+    result = await window(deps, file, () => git(["push", "--atomic",
       `--force-with-lease=refs/heads/next:${main}`, "origin",
       `${rs}:refs/heads/next`, keep]));
   }
@@ -798,6 +1005,58 @@ export const unproven = (runs) => REQUIRED.filter((name) => !runs.some(
   (run) => run.name === name && run.status === "completed"
     && run.conclusion === "success"));
 
+// Whether step 2's pushes already went through, so a run again after a
+// failed delete only deletes (round 3, F). They did when `next` is
+// `hotfix/rebuilt` and `staging` has left `main`, which only step 2
+// moves it from. With `staging` still at `main` and `next` past it,
+// either step 2 went through on a rebuilt staging that was `main`, or
+// step 1 left a rebuilt staging that is also the rebuilt next; the
+// rebuilt next holds a commit rebuilt from `hotfix/staging` (same
+// author, date and subject) only in the second. Unsure is "moved",
+// since only deleting never moves `staging`.
+const movedAlready = async (git, heads) => {
+  const { main, next, staging } = heads;
+  const hs = heads[PLACEHOLDER.staging];
+
+  if (next !== heads[REBUILT]) return false;
+  if (staging !== main || next === main || !hs) return true;
+
+  const oldMain = await git(["merge-base", hs, main]);
+  const own = new Set((await commitsIn(git, `${oldMain}..${hs}`))
+    .map((c) => c.key));
+
+  return !(await commitsIn(git, `${main}..${next}`))
+    .some((c) => own.has(c.key));
+};
+
+// Deletes the hotfix branches, each leased on the head it had.
+const deleteHotfixBranches = async (git, heads, branches, out) => {
+  try {
+    await git(["push", "--atomic",
+      ...branches.map((name) => `--force-with-lease=refs/heads/${name}:${
+        heads[name]}`),
+      "origin", "--delete", ...branches.map((name) => `refs/heads/${name}`)]);
+  } catch (error) {
+    throw new Error(`Deleting ${branches.map(printable).join(", ")} failed: `
+      + `${said(error)}. staging and next have moved; run bin/nff hotfix `
+      + "finish again, which then only deletes them.", { cause: error });
+  }
+  out(`Deleted ${branches.map(printable).join(", ")}.`);
+};
+
+const reportLanes = (out, lanes, hn) => {
+  out("Landings on next are open again. CI runs on the rebuilt next.");
+  if (lanes.length) {
+    out(`Lanes that must rebase onto the new next (each: git rebase --onto `
+      + `origin/next ${printable(hn.slice(0, 12))}):`);
+    for (const lane of lanes) out(`  ${printable(lane)}`);
+  } else {
+    out("No lane holds a commit of the old next; none must rebase.");
+  }
+
+  return undefined;
+};
+
 // Step 2 of `finish`: once the checks on `next` are green, `staging` to
 // that commit and `next` to `hotfix/rebuilt`, both fast-forwards; then
 // the hotfix branches go.
@@ -819,12 +1078,29 @@ const finishSecond = async ({ dryRun, out }, { git, api }, heads) => {
     }
   }
 
-  const missing = unproven(await checkRuns(api, next));
   const lanes = hn
     ? await lanesToRebase(git, heads, hn, await git(["merge-base", hn, main]))
     : [];
   const branches = [PLACEHOLDER.next, PLACEHOLDER.staging, REBUILT]
     .filter((name) => heads[name]);
+
+  if (await movedAlready(git, heads)) {
+    if (dryRun) {
+      out("--dry-run: nothing is changed. hotfix finish (second run) "
+        + `would: delete ${branches.map(printable).join(", ")} only, since `
+        + `staging and next already moved (next is ${REBUILT}, `
+        + `${short(rebuilt)})`);
+
+      return undefined;
+    }
+    out(`staging and next already moved (next is ${REBUILT}, `
+      + `${short(rebuilt)}): only the hotfix branches are left to delete.`);
+    await deleteHotfixBranches(git, heads, branches, out);
+
+    return reportLanes(out, lanes, hn);
+  }
+
+  const missing = unproven(await checkRuns(api, next));
 
   if (dryRun) {
     out("--dry-run: nothing is changed. hotfix finish (second run) would:");
@@ -851,20 +1127,9 @@ const finishSecond = async ({ dryRun, out }, { git, api }, heads) => {
     `${rebuilt}:refs/heads/next`]);
   out(`staging is now ${short(next)}, the commit next held, and next is `
     + `${short(rebuilt)}, the rebuilt next.`);
-  await git(["push", "--atomic", "origin", "--delete",
-    ...branches.map((name) => `refs/heads/${name}`)]);
-  out(`Deleted ${branches.map(printable).join(", ")}.`);
+  await deleteHotfixBranches(git, heads, branches, out);
 
-  out("Landings on next are open again. CI runs on the rebuilt next.");
-  if (lanes.length) {
-    out(`Lanes that must rebase onto the new next (each: git rebase --onto `
-      + `origin/next ${printable(hn.slice(0, 12))}):`);
-    for (const lane of lanes) out(`  ${printable(lane)}`);
-  } else {
-    out("No lane holds a commit of the old next; none must rebase.");
-  }
-
-  return undefined;
+  return reportLanes(out, lanes, hn);
 };
 
 const finish = async (options, deps) => {
@@ -875,18 +1140,36 @@ const finish = async (options, deps) => {
     : finishFirst(options, deps, heads);
 };
 
-export const hotfixCommand = (action, rest, { flags = {}, out }, deps = {}) => {
-  const d = { ...realDeps, ...deps };
+// A flag the commands do not take, refused before anything is read
+// (round 3, E): a typo of --dry-run must never run for real. bin/nff
+// asks this too, before it routes. -> undefined, or the Error.
+export const flagRefusal = (action, flags = {}) => {
+  const unknown = Object.keys(flags).filter((name) => !FLAGS.includes(name));
 
+  return unknown.length ? new Error(`Refused: hotfix ${printable(action
+    ?? "")} takes only --dry-run and --yes, not ${unknown
+    .map((name) => `--${printable(name)}`).join(", ")}. Nothing changed.`)
+    : undefined;
+};
+
+export const hotfixCommand = async (action, rest, { flags = {}, out },
+  deps = {}) => {
+  const refusal = flagRefusal(action, flags);
+
+  if (refusal) throw refusal;
+  if (!["start", "finish"].includes(action)) {
+    throw new Error("hotfix start or hotfix finish?");
+  }
   if (rest.length) {
     throw new Error(`Refused: hotfix ${printable(action)} takes no `
       + "arguments.");
   }
 
-  const options = { dryRun: on(flags["dry-run"]), yes: on(flags.yes), out };
+  const d = { ...realDeps, ...deps, out };
+  const file = await preflight(d);
+  const options = {
+    dryRun: on(flags["dry-run"]), yes: on(flags.yes), out, file,
+  };
 
-  if (action === "start") return start(options, d);
-  if (action === "finish") return finish(options, d);
-
-  throw new Error("hotfix start or hotfix finish?");
+  return action === "start" ? start(options, d) : finish(options, d);
 };

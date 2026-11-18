@@ -346,9 +346,16 @@ prints the plan and changes nothing.
    `staging` and `main` are one commit. It rebuilds the placeholders
    on `main` in the checkout it runs in, stopping on a conflict with
    the commit and files named: fix them, `git add` them and run it
-   again. It refuses to push if the rebuilt branches lack a line a
-   placeholder commit added, and names each commit dropped because
-   `main` already has it. Then it force-pushes `next` to the rebuilt
+   again. It then compares trees, path by path (2026-11-18, #631's
+   security review: it compared lines, which let a lost deletion,
+   whitespace, mode or binary change through). Where the hotfix
+   changed nothing, each rebuilt branch must match its placeholder;
+   where the placeholders changed nothing, it must match `main`. It
+   refuses to push, naming the path, when either fails. Where both
+   changed a path, it shows how the rebuild differs from the
+   placeholder and asks, even with `--yes`; a no refuses. It names
+   each commit dropped because `main` has a copy of it, and each the
+   rebuild emptied otherwise. Then it force-pushes `next` to the rebuilt
    staging and keeps the rebuilt next as `hotfix/rebuilt`. `staging`
    stays at `main`, since the "required checks" ruleset (25361919)
    lets it take only a commit whose checks passed, and those run only
@@ -361,14 +368,55 @@ prints the plan and changes nothing.
    rebase. So `staging` takes only what a push to `next` proved.
 
 `start` and the first `finish` force-push inside a window on the
-"no force-push or deletion" ruleset (25361439): narrowed to `main`
-alone for the push, then restored from the copy saved first and read
-back against it, even when the push fails. A read-back that differs
-is an error naming the ruleset. The second `finish` only
+"no force-push or deletion" ruleset (25361439). Each refuses unless
+the ruleset covers exactly `next`, `staging` and `main`, and writes
+the copy it saves to `nff-hotfix-ruleset-25361439.json` in the git
+common directory (`.git/` of the main checkout) before it narrows the
+ruleset to `main` alone. After the push, failed or not, it restores
+that copy, up to three tries, and reads it back; Ctrl-C, SIGTERM and
+SIGHUP restore it too before the command exits. The file goes once
+the read-back matches. A read-back that differs is an error naming
+the ruleset, and the file stays. The second `finish` only
 fast-forwards and opens no window. Neither the "linear history"
 ruleset (25898866) nor the required checks are ever relaxed: the
 rebuilt branches hold no merge commit, and `staging` waits for its
 checks.
+
+Every `start` and `finish` first refuses while that file is left or
+the live ruleset lacks `next` or `staging`, and never restores it by
+itself. A run killed hard inside the window (a crash, `kill -9`, the
+laptop asleep mid-push) leaves both, and the refusal says what to do:
+
+1. `gh api repos/north-foster-farm/north-foster-farm/rulesets/25361439`
+   shows the live ruleset. If it covers `next`, `staging` and `main`,
+   nothing needs restoring; skip to step 3.
+2. `gh api -X PUT repos/north-foster-farm/north-foster-farm/rulesets/25361439
+   --input <the file>` restores it. Read it back as in step 1.
+3. Delete the file, then run the command again. Its refusals say
+   where the hotfix stood; `--dry-run` shows the plan.
+
+With no file, a narrowed ruleset was left by a run in another
+checkout: restore it from there, or in GitHub (Settings, Rules,
+Rulesets) so it covers the three branches.
+
+If `start`'s push of `next` and `staging` fails, it fetches again and
+deletes the placeholders only if both branches are still where they
+were. If either moved, origin took the push though the client saw it
+fail, and the placeholders stay as the only refs to the unreleased
+work: go on with the hotfix as if `start` had succeeded. If the
+second `finish` fails after moving `staging` and `next`, run it
+again; it then only deletes the `hotfix/*` branches.
+
+A landing on `next` during the freeze leaves the placeholders safe
+but blocks `finish`. Before the first `finish`, `next` no longer
+equals `main`, so it refuses. If the landing is fit to release,
+promote it with the hotfix (`bin/nff promote staging`, then `main`)
+so the three are one commit again, and run `finish`. Between the two
+runs, the second `finish` refuses because `next` is not part of
+`hotfix/rebuilt`. Either way, a landing not fit to release, or one
+between the runs, goes to James before anything is forced: the way
+back is to reopen the window by hand, put `next` back where `finish`
+expects it, and land that change again after the second `finish`.
 
 ## The e2e suite against staging
 

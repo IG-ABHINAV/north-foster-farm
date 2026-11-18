@@ -256,17 +256,24 @@ to-do list and prints the line to paste into the pull request.
 
 ## Fast-forward only
 
-`next`, `staging` and `main` take fast-forwards only. Three rulesets
-on `north-foster-farm`, with no bypass actor:
+`next`, `staging` and `main` take fast-forwards only. Four rulesets
+on `north-foster-farm` cover all three. Three have no bypass actor;
+`updates: admins only` has one (2026-11-18, #631's security review:
+this said three rulesets, none with a bypass actor):
 
 - `no force-push or deletion: next, staging, main` (25361439).
   `bin/nff hotfix start` and `finish` narrow it to `main` alone for
   their force-pushes and restore it after ("Hotfix" in
   `docs/cloud-lanes.md`).
-- Linear history (25898866) on all three (2026-11-18, #612: this said
-  linear history on `next` and `staging` only, so that `main` could
-  take a release branch's merge; since James's rule of 2026-11-18
-  `main` moves only by a fast-forward from `staging`).
+- Linear history (25898866) on all three, though GitHub still names it
+  `linear history: next, staging` (2026-11-18, #612: this said linear
+  history on `next` and `staging` only, so that `main` could take a
+  release branch's merge; since James's rule of 2026-11-18 `main`
+  moves only by a fast-forward from `staging`).
+- `updates: admins only (next, staging, main)` (25783412): the
+  "restrict updates" rule, with the repository's Admin role as its
+  one bypass actor (always), so only an admin's push moves the three
+  branches. The hotfix commands never write it.
 - `required checks: staging, main` (25361919): `lint-and-test`,
   `supply-chain` and `codeql`, each from the GitHub Actions app. Never
   relaxed for a hotfix: `bin/nff hotfix finish` takes two runs so that

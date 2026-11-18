@@ -42,7 +42,9 @@ import { verifyEnv } from "./env/verify.mjs";
 import { setSchedule } from "./schedule-env.mjs";
 import { shipLog } from "./ship-log.mjs";
 import { USAGE as E2E_USAGE, e2eCommand } from "./e2e/dispatch.mjs";
-import { USAGE as HOTFIX_USAGE, hotfixCommand } from "./hotfix.mjs";
+import {
+  USAGE as HOTFIX_USAGE, flagRefusal as hotfixFlagRefusal, hotfixCommand,
+} from "./hotfix.mjs";
 import { USAGE as PROMOTE_USAGE, promoteCommand } from "./promote.mjs";
 import { USAGE as REDEPLOY_USAGE, redeploy } from "./redeploy.mjs";
 import { USAGE as SUPPLY_USAGE, supplyCommand } from "./supply/waive.mjs";
@@ -1225,6 +1227,11 @@ const run = async () => {
     return promoteCommand(action, rest, { flags, out });
   }
   if (group === "hotfix") {
+    // Before anything is read: a typo of --dry-run never runs for real.
+    const refusal = hotfixFlagRefusal(action, flags);
+
+    if (refusal) throw refusal;
+
     return hotfixCommand(action, rest, { flags, out });
   }
   if (group === "e2e") {

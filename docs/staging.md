@@ -162,9 +162,12 @@ fast-forward from `staging`: promotion moves a branch to a SHA already
 checked, so the commit that ships is the commit that was tested. A
 hotfix rides the same road ("Hotfix" in `docs/cloud-lanes.md`).
 
-Rulesets with no bypass actor enforce it (`docs/security.md`). All
-three branches take fast-forwards only, with no force push or
-deletion, and linear history (2026-11-18, #612: linear history covered
+Four rulesets enforce it (`docs/security.md`). Only one has a bypass
+actor: `updates: admins only` lets the Admin role push, and no one
+else (2026-11-18, #631's security review: this said the rulesets had
+no bypass actor). All three branches take fast-forwards only, with no
+force push or deletion, and linear history (2026-11-18, #612: linear
+history covered
 `next` and `staging` only and `main` took a release branch's merge;
 since James's rule of 2026-11-18 it covers all three and `main` takes
 no merge). `staging` and `main` also require `lint-and-test`,

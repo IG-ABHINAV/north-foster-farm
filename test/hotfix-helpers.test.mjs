@@ -7,8 +7,8 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
-  REQUIRED, RULESET_PATH, addedLines, differences, listed, narrowed,
-  unproven,
+  REQUIRED, RULESET_PATH, differences, listed, narrowed, notWhole,
+  restoreCommand, unproven,
 } from "../bin/hotfix.mjs";
 
 const RULESET = {
@@ -27,35 +27,28 @@ const RULESET = {
 };
 
 describe("bin/hotfix.mjs helpers", () => {
-  it("reads the lines each file gains, quoted and binary paths too", () => {
-    const diff = [
-      "diff --git a/a.txt b/a.txt",
-      "--- a/a.txt",
-      "+++ b/a.txt",
-      "@@ -2 +2 @@",
-      "-two",
-      "+two from next",
-      "diff --git \"a/caf\\303\\251.txt\" \"b/caf\\303\\251.txt\"",
-      "new file mode 100644",
-      "--- /dev/null",
-      "+++ \"b/caf\\303\\251.txt\"",
-      "@@ -0,0 +1 @@",
-      "+bonjour",
-      "diff --git a/gone.txt b/gone.txt",
-      "deleted file mode 100644",
-      "--- a/gone.txt",
-      "+++ /dev/null",
-      "@@ -1 +0,0 @@",
-      "-bye",
-      "diff --git a/logo.png b/logo.png",
-      "Binary files a/logo.png and b/logo.png differ",
-    ].join("\n");
-    const files = addedLines(diff);
+  it("calls a ruleset whole only on exactly next, staging and main with "
+    + "both rules", () => {
+    const withInclude = (include) => ({
+      ...RULESET, conditions: { ref_name: { exclude: [], include } },
+    });
 
-    assert.deepEqual(files.get("a.txt"), { lines: ["two from next"] });
-    assert.deepEqual(files.get("café.txt"), { lines: ["bonjour"] });
-    assert.equal(files.has("gone.txt"), false);
-    assert.deepEqual(files.get("logo.png"), { lines: [], binary: true });
+    assert.equal(notWhole(RULESET), undefined);
+    assert.equal(notWhole(withInclude(["refs/heads/main",
+      "refs/heads/next", "refs/heads/staging"])), undefined, "any order");
+    assert.match(notWhole(withInclude(["refs/heads/main"])),
+      /covers main, not exactly/);
+    assert.match(notWhole(withInclude([...RULESET.conditions.ref_name
+      .include, "refs/heads/release"])), /release/);
+    assert.match(notWhole({ ...RULESET, rules: [{ type: "deletion" }] }),
+      /rule/);
+  });
+
+  it("prints a restore command the shell runs as printed", () => {
+    assert.equal(restoreCommand("/r/.git/x.json"),
+      `gh api -X PUT ${RULESET_PATH} --input /r/.git/x.json`);
+    assert.equal(restoreCommand("/my repo/it's.json"),
+      `gh api -X PUT ${RULESET_PATH} --input '/my repo/it'\\''s.json'`);
   });
 
   it("narrows to main alone and keeps every rule and no bypass", () => {

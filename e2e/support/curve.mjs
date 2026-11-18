@@ -18,6 +18,8 @@
 // `step` px a frame, after the floating pane's resting place, which
 // eases on its own CSS transition, is taken out; that resting place
 // may itself move only while its transition runs (James's 23px drop).
+// A move whose whole ease fell between two frames is held to the
+// travel of its eases instead (missed, #635).
 //
 // No Playwright import: the unit tests load it (test/e2e-curve.test.mjs).
 
@@ -184,8 +186,88 @@ export const offCurve = (frames, { step = 8, px = 1 } = {}) => {
   return null;
 };
 
+// The lengths an ease's keyframes carry, by the axis they move edges
+// on. `translate` is "x y". Any other property (opacity, flex-grow)
+// moves no edge.
+const DOWN_BY = new Set([
+  "height", "minHeight", "maxHeight", "top", "bottom", "paddingTop",
+  "paddingBottom", "borderTopWidth", "borderBottomWidth", "marginTop",
+  "marginBottom",
+]);
+const ACROSS_BY = new Set([
+  "width", "minWidth", "maxWidth", "flexBasis", "left", "right",
+  "paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth",
+  "marginLeft", "marginRight",
+]);
+
+// How far an ease can move any edge, down and across, from its
+// keyframes (getKeyframes()): each length's range over the frames,
+// summed. In flow no edge moves further than every eased length
+// together, so this bounds what the ease alone can do.
+export const travelOf = (keys = []) => {
+  const travel = { down: 0, across: 0 };
+  const ranges = {};
+
+  for (const key of keys) {
+    for (const [name, value] of Object.entries(key)) {
+      const axes = name === "translate" ? ["across", "down"]
+        : DOWN_BY.has(name) ? ["down"]
+          : ACROSS_BY.has(name) ? ["across"] : [];
+
+      String(value).trim().split(/\s+/).slice(0, axes.length)
+        .forEach((v, k) => {
+          const n = parseFloat(v);
+
+          if (Number.isNaN(n)) return;
+
+          const r = ranges[`${name} ${k}`] ||= { axis: axes[k], lo: n, hi: n };
+
+          r.lo = Math.min(r.lo, n);
+          r.hi = Math.max(r.hi, n);
+        });
+    }
+  }
+  for (const r of Object.values(ranges)) travel[r.axis] += r.hi - r.lo;
+
+  return travel;
+};
+
+// The eases a frame pair missed whole: those that began after the
+// first frame (the later frame's `began`, noted as the page started
+// them), with neither frame in a move, each shorter than the gap
+// between the two frames. Their travel summed, or null for none.
+//
+// WebKit on CI draws a frame only every 400 to 700 ms while the main
+// thread is free (#635: 461 and 665 ms around a settle, 488 around a
+// minimize), so a whole 420 ms move can fall between two frames and
+// show only its start and its end. The rule that holds a still pane
+// to `step` px a frame cannot judge that step. It allows it only as
+// far as the missed eases' own travel on the edge's axis, so:
+// - a step with no ease begun between the two frames is still a jump;
+// - a move seen on any frame is still held to its curve (offCurve):
+//   either frame in a move takes the pair out of this rule;
+// - an ease that began but could still have been running at the later
+//   frame (the gap no longer than it) exempts nothing;
+// - a step beyond what the begun eases could move is still a jump.
+// What the frames cannot show they cannot vouch for: a snap no larger
+// than the missed move, hidden in the same gap, passes. The next pair
+// is held to `step` again, so nothing may go on moving after it.
+const missed = (f, g) => {
+  const began = g.began || [];
+
+  if (!began.length) return null;
+  if (began.some((e) => !(g.t - f.t > e.duration))) return null;
+
+  return began.reduce((sum, e) => {
+    const t = travelOf(e.keys);
+
+    return { down: sum.down + t.down, across: sum.across + t.across };
+  }, { down: 0, across: 0 });
+};
+
 // The first frame pair, outside any move, in which an edge moved more
-// than `step` px, or the floating pane's resting place moved with no
+// than `step` px, or than the eases the pair missed can move it
+// (missed), or the floating pane's resting place moved with no
 // transition: { at, why } with `at` the later frame, or null.
 export const offRest = (frames, { step = 8, px = 1 } = {}) => {
   for (let i = 0; i + 1 < frames.length; i += 1) {
@@ -193,6 +275,8 @@ export const offRest = (frames, { step = 8, px = 1 } = {}) => {
     const g = frames[i + 1];
 
     if (f.move || g.move) continue;
+
+    const unseen = missed(f, g);
 
     const floating = f.placement !== "inline" && g.placement !== "inline";
     const rest = floating ? (g.bottom || 0) - (f.bottom || 0) : 0;
@@ -227,13 +311,21 @@ export const offRest = (frames, { step = 8, px = 1 } = {}) => {
           else if (Math.abs(page) < Math.abs(d)) d = page;
         }
 
-        if (Math.abs(d) > step + px) {
-          return {
-            at: i + 1,
-            why: `the ${part}'s ${edge} jumped ${d.toFixed(1)}px in one `
+        if (Math.abs(d) <= step + px) continue;
+
+        const may = unseen && unseen[DOWN.has(edge) ? "down" : "across"];
+
+        if (unseen && Math.abs(d) <= may + px) continue;
+
+        return {
+          at: i + 1,
+          why: unseen
+            ? `the ${part}'s ${edge} jumped ${d.toFixed(1)}px in one frame, `
+              + `more than the ${may.toFixed(1)}px the ease begun between `
+              + `the two (${Math.round(g.t - f.t)}ms apart, none seen) moves`
+            : `the ${part}'s ${edge} jumped ${d.toFixed(1)}px in one `
               + `frame with the cart unchanged (at most ${step})`,
-          };
-        }
+        };
       }
     }
   }

@@ -143,8 +143,13 @@ const record = (page) => page.evaluate(() => {
   };
   // Every ease of the pane as it starts, from the page's own record of
   // it: whose it is, its opacity keyframes and its length. A move the
-  // frames miss is still seen here.
+  // frames miss is still seen here: the eases are noted as the page
+  // starts them (animate, below), since one that ends between two
+  // frames is gone from getAnimations() by the later one. The next
+  // frame keeps the eases begun since the last as `began`, with their
+  // keyframes, for offRest (e2e/support/curve.mjs, #635).
   const eases = [];
+  let began = [];
   const known = new WeakSet();
   const whose = (el) => {
     if (el.matches("[data-cart-word]")) return "word";
@@ -154,19 +159,36 @@ const record = (page) => page.evaluate(() => {
 
     return hit ? hit[0] : el.tagName.toLowerCase();
   };
+  const noteEase = (a) => {
+    if (a.id !== "cart-move" || known.has(a) || !a.effect) return;
+    known.add(a);
+
+    const keys = a.effect.getKeyframes();
+    const duration = Number(a.effect.getTiming().duration);
+
+    eases.push({
+      frame: frames.length,
+      part: whose(a.effect.target),
+      duration,
+      opacity: keys
+        .filter((k) => k.opacity !== undefined)
+        .map((k) => ({ offset: k.computedOffset, opacity: +k.opacity })),
+    });
+    began.push({ duration, keys });
+  };
   const noteEases = () => {
-    for (const a of pane.getAnimations({ subtree: true })) {
-      if (a.id !== "cart-move" || known.has(a) || !a.effect) continue;
-      known.add(a);
-      eases.push({
-        frame: frames.length,
-        part: whose(a.effect.target),
-        duration: a.effect.getTiming().duration,
-        opacity: a.effect.getKeyframes()
-          .filter((k) => k.opacity !== undefined)
-          .map((k) => ({ offset: k.computedOffset, opacity: +k.opacity })),
-      });
-    }
+    for (const a of pane.getAnimations({ subtree: true })) noteEase(a);
+  };
+
+  window.cartAnimate ||= Element.prototype.animate;
+  const animate = window.cartAnimate;
+
+  Element.prototype.animate = function noted(...args) {
+    const a = animate.apply(this, args);
+
+    if (pane.contains(this)) noteEase(a);
+
+    return a;
   };
   // The move this frame is in, from the page's own record of it, read
   // in the same frame as the boxes: its number (pane.eases, one a
@@ -212,6 +234,7 @@ const record = (page) => page.evaluate(() => {
         subtree: true,
       }).filter((a) => a.id === "cart-move").length,
       move: moveOf(),
+      began,
       // Where the floating pane rests over the screen's foot, and
       // whether that eases now (_cart.scss, the sheet's bottom).
       bottom: parseFloat(s.bottom) || 0,
@@ -260,6 +283,7 @@ const record = (page) => page.evaluate(() => {
       badge: box(badge),
       tip: box(tip),
     });
+    began = [];
     beats = 0;
     turn = 0;
     window.cartTick = requestAnimationFrame(tick);
@@ -288,6 +312,7 @@ const recorded = async (page, order) => {
   return page.evaluate(() => {
     cancelAnimationFrame(window.cartTick);
     clearTimeout(window.cartBeat);
+    Element.prototype.animate = window.cartAnimate;
 
     return window.cartFrames;
   });
@@ -506,10 +531,12 @@ const movesTogether = (name, frames) => {
 // its curve still fails. Between moves, with the cart unchanged, no
 // edge moves more than STEP px from one frame to the next (the
 // minimized pane that dropped 23px mid-scroll), and the floating pane's
-// resting place moves only on its own ease. A settled pane's parts are
-// measured against the page, a floating one's against the screen's
-// foot. A part that does not show, or that comes or goes in the move,
-// is not measured; the overlap rule (textsApart) holds it.
+// resting place moves only on its own ease. A move whose whole ease
+// fell between two frames (#635: WebKit on CI, 461 to 665 ms apart)
+// may step as far as its eases travel, and no further. A settled
+// pane's parts are measured against the page, a floating one's against
+// the screen's foot. A part that does not show, or that comes or goes
+// in the move, is not measured; the overlap rule (textsApart) holds it.
 const STEP = 8;
 const MOVE_MS = 420;
 

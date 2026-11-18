@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  curve, movesIn, offCurve, offRest, progressOf,
+  curve, movesIn, offCurve, offRest, progressOf, travelOf,
 } from "../e2e/support/curve.mjs";
 
 const EASE = "cubic-bezier(0.2, 0.8, 0.25, 1)";
@@ -195,5 +195,85 @@ describe("the cart unchanged", () => {
     ];
 
     assert.equal(offRest(frames), null);
+  });
+});
+
+// A move whose whole ease fell between two frames (#635). The frames
+// are run 44315232945's minimize on scroll, on the iphone project: the
+// open pane's top at 230, then, 488 ms later with no frame between, at
+// 487 minimized. The ease is the lines' height giving up the 257px.
+describe("a move the frames missed", () => {
+  const fold = (keys = [{ height: "257px" }, { height: "0px" }]) => ({
+    duration: 420, keys,
+  });
+  const missedFold = (began, gap = 488) => [
+    frame({ top: 230, t: 17503 }),
+    frame({ top: 487, t: 17503 + gap, began }),
+    frame({ top: 487, t: 17503 + gap + 202 }),
+  ];
+
+  it("sums each eased length's range, by the axis it moves", () => {
+    assert.deepEqual(travelOf([
+      {
+        offset: 0, height: "120px", paddingTop: "8px", opacity: "1",
+        flexBasis: "90px", translate: "0px 12px", maxHeight: "none",
+      },
+      {
+        offset: 1, height: "0px", paddingTop: "0px", opacity: "0",
+        flexBasis: "130px", translate: "0px 0px", maxHeight: "none",
+      },
+    ]), { down: 140, across: 40 });
+    assert.deepEqual(travelOf(), { down: 0, across: 0 });
+  });
+
+  it("still fails a jump with no ease begun", () => {
+    const off = offRest(missedFold([]));
+
+    assert.equal(off.at, 1);
+    assert.match(off.why, /pane's top jumped 257\.0px.*at most 8/);
+  });
+
+  it("still passes an eased move seen frame by frame", () => {
+    const frames = [
+      frame({ top: 230, t: 0 }),
+      frame({ top: paneAt(48), move: at(48), t: 48, began: [fold()] }),
+      frame({ top: paneAt(370), move: at(370), t: 370 }),
+      frame({ top: 516, t: 692 }),
+    ];
+
+    assert.equal(offCurve(frames), null);
+    assert.equal(offRest(frames), null);
+  });
+
+  it("passes a whole ease missed between two far-apart frames", () => {
+    assert.equal(offRest(missedFold([fold()])), null);
+  });
+
+  it("fails a jump larger than the ease's travel", () => {
+    const short = fold([{ height: "100px" }, { height: "0px" }]);
+    const off = offRest(missedFold([short]));
+
+    assert.equal(off.at, 1);
+    assert.match(off.why, /jumped 257\.0px .* more than the 100\.0px/);
+  });
+
+  it("fails it when the frames were close enough to see the ease", () => {
+    const off = offRest(missedFold([fold()], 400));
+
+    assert.match(off.why, /pane's top jumped 257\.0px.*at most 8/);
+  });
+
+  it("allows only the ease's own axis", () => {
+    const across = fold([{ flexBasis: "257px" }, { flexBasis: "0px" }]);
+
+    assert.match(offRest(missedFold([across])).why, /more than the 0\.0px/);
+  });
+
+  it("holds the next frame pair to the step again", () => {
+    const frames = missedFold([fold()]);
+
+    frames[2] = { ...frames[2], ...frame({ top: 507, t: frames[2].t }) };
+    assert.equal(offRest(frames).at, 2);
+    assert.match(offRest(frames).why, /jumped 20\.0px.*at most 8/);
   });
 });

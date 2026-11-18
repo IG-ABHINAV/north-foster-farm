@@ -930,22 +930,21 @@ class Account {
       })
     );
 
-    // A buying group's member (#471): the group's name and the credit
-    // balance, on the head's right. Credit is the account's (#495,
-    // decision 6), so someone who left a group with some still sees
-    // it; with neither, nothing. Draft wording.
-    const box = document.getElementById("account-member");
+    // The credit balance, on Sign out's line after a dot (#471, #608):
+    // for a buying group's member, and, as credit is the account's
+    // (#495, decision 6), for someone who left a group with some. With
+    // neither, Sign out alone and no dot. Draft wording.
+    const line = document.getElementById("account-under");
     const m = this.member;
     const credit = m ? m.credit || 0 : this.credit || 0;
 
-    if (box) {
-      const name = qs(box, "[data-member-group]");
+    if (line) {
+      const out = document.getElementById("account-credit");
+      const shown = !!m || credit > 0;
 
-      box.hidden = !m && !credit;
-      name.hidden = !m;
-      name.textContent = m ? m.name : "";
-      qs(box, "[data-member-credit]").textContent =
-        `Credit: ${dollars(credit)}`;
+      out.hidden = !shown;
+      out.textContent = shown ? `Credit: ${dollars(credit)}` : "";
+      line.toggleAttribute("data-credit", shown);
     }
   }
 

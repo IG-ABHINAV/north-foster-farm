@@ -100,6 +100,8 @@ const plugins = [
         "data-more",
         // The account tab row's start fade (#591, tabs-more.js).
         "data-back",
+        // The account head's Sign out line with a credit on it (#608).
+        "data-credit",
         "data-top",
         "data-card-open",
         "data-cart-passed",

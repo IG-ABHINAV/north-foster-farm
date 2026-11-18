@@ -19,18 +19,18 @@
             {{ partial "svg.html" (dict "use" "avatar-hen-brown" "class" "account-avatar" "id" "account-avatar" "aria-hidden" "true") }}
             {{/* The address in the headings' type, bold, and Sign out
                  under it as a quiet link, so the address has the width
-                 (#303). */}}
+                 (#303). On Sign out's line, after a dot, the credit
+                 balance (#471, #608): for a buying group's member and
+                 for anyone with credit, a member or not (#495,
+                 decision 6). No group's name here (James, #608): it
+                 heads the Membership tab. main.js fills the credit and
+                 marks the line, which draws the dot. */}}
             <div class="account-who">
               <p class="account-email" id="account-email"></p>
-              {{ partial "busy-button.html" (dict "label" "Sign out" "busy" "Signing out" "class" "account-signout" "plain" true "start" true "id" "account-signout" "type" "button" "error" true) }}
-            </div>
-            {{/* A buying group's member (#471): the group's name and
-                 the credit balance, on the head's right. The balance
-                 shows for anyone with credit, a member or not (#495,
-                 decision 6). Draft wording; main.js fills it. */}}
-            <div class="account-member" id="account-member" hidden>
-              <p class="account-member-group" data-member-group></p>
-              <p class="account-member-credit" data-member-credit></p>
+              <div class="account-under" id="account-under">
+                {{ partial "busy-button.html" (dict "label" "Sign out" "busy" "Signing out" "class" "account-signout" "plain" true "start" true "id" "account-signout" "type" "button" "error" true) }}
+                <span class="account-credit" id="account-credit" hidden></span>
+              </div>
             </div>
           </header>
 

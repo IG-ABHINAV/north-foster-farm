@@ -42,8 +42,8 @@
   // Head: the avatar, the address in the headings' type, and Sign out
   // under it as a quiet link (#303).
 
-  // A grid, so the email address has the head's width beside the
-  // avatar whatever sits with it (#601).
+  // A grid of two columns, the avatar and the rest, so the email
+  // address has the head's width beside the avatar (#601, #608).
   .account-head {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -75,45 +75,60 @@
     min-width: 0;
   }
 
-  // A buying group's member: the group's name and the credit (#471).
-  // Below md, a phone above all, the head is one column (James, #601):
-  // the avatar and the email address with Sign out, then the group and
-  // the credit as a row of their own under them, left aligned with the
-  // head, so a long name never squeezes the address to a letter a
-  // line. From md up they sit on the head's right, in at most half of
-  // it, and a long name wraps there.
-  .account-member {
-    grid-column: 1 / -1;
-    min-width: 0;
-    margin-top: 0.75rem;
-
-    @include media-breakpoint-up(md) {
-      grid-column: 3;
-      margin-top: 0;
-      text-align: right;
-    }
-  }
-
-  @include media-breakpoint-up(md) {
-    .account-head {
-      grid-template-columns: auto minmax(0, 1fr) fit-content(50%);
-    }
-  }
-
-  .account-member-group,
-  .account-member-credit {
-    margin: 0;
-    line-height: 1.25;
-  }
-
-  .account-member-group {
-    font-family: $headings-font-family;
-    font-weight: bold;
-  }
-
-  .account-member-credit {
+  .account-credit {
     font-size: 0.875rem;
     color: var(--bs-secondary-color);
+    white-space: nowrap;
+
+    &[hidden] {
+      display: none;
+    }
+  }
+
+  // Under the address, one line (#608): Sign out, then for an account
+  // with a credit balance a dot and the credit (#471), small and gray.
+  // The dot is Sign out's, drawn in the gap as the footer's dots are
+  // (_dot-list.scss), so if the line must wrap it wraps at the dot,
+  // the dot ending the first line and the credit whole on the second.
+  // The line that says signing out failed takes a row of its own.
+  .account-under {
+    --account-dot-gap: 1rem;
+
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--account-dot-gap);
+
+    .busy-button-error {
+      flex-basis: 100%;
+      order: 1;
+    }
+
+    // Sign out is as wide as its words, not as "Signing out", so the
+    // dot sits by them. The busy face lies over what follows, which
+    // goes for as long as it shows.
+    .busy-button-busy {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    &[data-credit] .account-signout:not([data-busy="true"])::after {
+      position: absolute;
+      left: calc(100% + var(--account-dot-gap) / 2);
+      color: $breadcrumb-divider-color; // The footer's dot, _dot-list.scss.
+      // Empty alternative text: the dot is no part of the button's
+      // name, which stays "Sign out". A browser without the syntax
+      // takes the line before it.
+      content: "·";
+      content: "·" / "";
+      pointer-events: none;
+      transform: translateX(-50%);
+    }
+
+    .account-signout[data-busy="true"] ~ .account-credit {
+      visibility: hidden;
+    }
   }
 
   .account-email {
@@ -134,6 +149,7 @@
   }
 
   .account-signout {
+    position: relative;
     padding: 0;
     border: 0;
     background: none;

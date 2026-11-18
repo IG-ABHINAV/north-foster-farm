@@ -370,6 +370,7 @@
         "e2e/contact-send.spec.mjs",
         "e2e/contact.spec.mjs",
         "e2e/countdown-date.spec.mjs",
+        "e2e/delivery-moved.spec.mjs",
         "e2e/delivery-pass.spec.mjs",
         "e2e/edit-order-date.spec.mjs",
         "e2e/fake-payments.spec.mjs",
@@ -444,6 +445,7 @@
         "e2e/contact-send.spec.mjs",
         "e2e/contact.spec.mjs",
         "e2e/countdown-date.spec.mjs",
+        "e2e/delivery-moved.spec.mjs",
         "e2e/delivery-pass.spec.mjs",
         "e2e/edit-order-date.spec.mjs",
         "e2e/fake-payments.spec.mjs",
@@ -1137,6 +1139,14 @@
       ],
       "specs": [
         "e2e/customer-emails.spec.mjs"
+      ]
+    },
+    {
+      "paths": [
+        "e2e/delivery-moved.spec.mjs"
+      ],
+      "specs": [
+        "e2e/delivery-moved.spec.mjs"
       ]
     },
     {

@@ -1,3 +1,14 @@
+// Criteria copy of test/dates.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/dates.criteria.mjs test/dates.test.mjs
+//
+// Changed: the on-farm list's labels and "labels a window for
+// people".
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -37,10 +48,12 @@ describe("on-farm pickup, from the farm's schedule (W11d)", () => {
       "listed");
     assert.equal(got[0].label, label("2026-10-07"));
     assert.deepEqual(got[0].windows, [
-      { id: "09:00-12:00", from: "09:00", to: "12:00", label: "9 AM – noon" },
-      { id: "13:00-17:00", from: "13:00", to: "17:00", label: "1 – 5 PM" },
+      { id: "09:00-12:00", from: "09:00", to: "12:00",
+        label: "9:00 AM – 12:00 PM" },
+      { id: "13:00-17:00", from: "13:00", to: "17:00",
+        label: "1:00 – 5:00 PM" },
     ]);
-    assert.equal(got[1].windows[0].label, "10 – 11:30 AM");
+    assert.equal(got[1].windows[0].label, "10:00 – 11:30 AM");
   });
 
   it("closes a day at midnight before it (W11d-A)", () => {
@@ -185,11 +198,14 @@ describe("the schedule's format and deploy check", () => {
     });
 
   it("labels a window for people", () => {
-    assert.equal(windowLabel({ from: "09:00", to: "12:00" }), "9 AM – noon");
-    assert.equal(windowLabel({ from: "13:00", to: "17:00" }), "1 – 5 PM");
+    assert.equal(windowLabel({ from: "09:00", to: "12:00" }),
+      "9:00 AM – 12:00 PM");
+    assert.equal(windowLabel({ from: "13:00", to: "17:00" }),
+      "1:00 – 5:00 PM");
     assert.equal(windowLabel({ from: "11:30", to: "13:00" }),
-      "11:30 AM – 1 PM");
-    assert.equal(windowLabel({ from: "12:00", to: "14:00" }), "noon – 2 PM");
+      "11:30 AM – 1:00 PM");
+    assert.equal(windowLabel({ from: "12:00", to: "14:00" }),
+      "12:00 – 2:00 PM");
   });
 
   it("gives the times of any record's pickup, however old", () => {

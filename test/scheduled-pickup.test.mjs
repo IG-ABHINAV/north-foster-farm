@@ -1,3 +1,14 @@
+// Criteria copy of test/scheduled-pickup.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/scheduled-pickup.criteria.mjs test/scheduled-pickup.test.mjs
+//
+// Changed: the account's pickup window, now with
+// its minutes.
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -306,7 +317,7 @@ describe("the account's pickup", () => {
     assert.equal(pub.pickup.name, "Drop site");
     assert.equal(pub.pickup.occurrence, order.fulfilment.occurrence);
     assert.match(pub.pickup.place, /46 Institute Lane/);
-    assert.equal(pub.pickup.window, "10 – 11 AM");
+    assert.equal(pub.pickup.window, "10:00 – 11:00 AM");
     assert.equal(pub.pickup.gone, false);
     assert.equal(order.pickup, undefined);
   });

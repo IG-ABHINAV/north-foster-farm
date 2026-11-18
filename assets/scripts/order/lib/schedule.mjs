@@ -24,7 +24,9 @@
 //
 // Times are the farm's wall clock (America/New_York), 24-hour.
 
-import { CODE, hasDate, occurrenceOf, seriesDates } from "./events.mjs";
+import {
+  CODE, hasDate, occurrenceOf, rangeWindow, seriesDates,
+} from "./events.mjs";
 import { addDays, dayName, today, weekday } from "./zoned.mjs";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -330,48 +332,11 @@ export const pickupTimes = (onfarm) => {
   return LEGACY[o.window] || null;
 };
 
-// "9 AM – noon", "1 – 5 PM", "11:30 AM – 1 PM": a window for people.
-export const windowLabel = ({ from, to }) => {
-  const clock = (hhmm) => {
-    const [h, m] = hhmm.split(":").map(Number);
-
-    if (h === 12 && m === 0) return { text: "noon", half: "" };
-    if (h === 0 && m === 0) return { text: "midnight", half: "" };
-
-    const hour = ((h + 11) % 12) + 1;
-
-    return {
-      text: m ? `${hour}:${String(m).padStart(2, "0")}` : `${hour}`,
-      half: h < 12 ? "AM" : "PM",
-    };
-  };
-  const a = clock(from);
-  const b = clock(to);
-  const start = a.half && a.half !== b.half ? `${a.text} ${a.half}`
-    : a.text;
-  const end = b.half ? `${b.text} ${b.half}` : b.text;
-
-  return `${start} – ${end}`;
-};
-
-// "8:00 – 10:00 AM", "10:00 AM – 12:00 PM": a window written in full,
-// for the on-farm "Pickup time" radios (#616). Both ends carry their
-// minutes; AM or PM is written once when the ends share it and on each
-// when they differ; twelve o'clock is "12:00 PM", never "noon". The
-// spaces are ordinary: the page keeps the label on one line (setWhole
-// in utils/keep-together.mjs).
-export const fullWindowLabel = ({ from, to }) => {
-  const clock = (hhmm) => {
-    const [h, m] = hhmm.split(":").map(Number);
-
-    return {
-      text: `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")}`,
-      half: h < 12 ? "AM" : "PM",
-    };
-  };
-  const a = clock(from);
-  const b = clock(to);
-  const start = a.half === b.half ? a.text : `${a.text} ${a.half}`;
-
-  return `${start} – ${b.text} ${b.half}`;
-};
+// "8:00 – 10:00 AM", "10:00 AM – 12:00 PM": a window for people, the
+// one way every page, email, slip and Square note writes it (#616).
+// Both ends carry their minutes; AM or PM is written once when the
+// ends share it and on each when they differ; twelve o'clock is
+// "12:00 PM", never "noon". The spaces are ordinary: a page keeps the
+// label on one line itself (setWhole in utils/keep-together.mjs). The
+// writing is rangeWindow's, which the series' hours use too.
+export const windowLabel = ({ from, to }) => rangeWindow(from, to);

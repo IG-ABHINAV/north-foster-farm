@@ -1,3 +1,21 @@
+// Criteria copy of test/square.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/square.criteria.mjs test/square.test.mjs
+//
+// Changed: the pickup note's window. Eight recorded requests in
+// test/fixtures/square still hold "pickup 9 AM – noon" and are
+// re-recorded: order-create-pickup, -external, -cash, -catalog,
+// -key-reused (test/square-replay.test.mjs compares them), -replay,
+// -short and -line-discount.
+//
+// Lint: test/square.test.mjs is in eslint.config.js's snake_case list;
+// this copy is not, so it says so itself.
+/* eslint camelcase: "off" */
+
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
@@ -373,7 +391,7 @@ describe("buildOrder", () => {
       "a record from before W11d: its morning is 9:00");
     assert.equal(f.pickup_details.recipient.phone_number, "+14015550100");
     assert.match(f.pickup_details.note, /prefers text/);
-    assert.match(f.pickup_details.note, /pickup 9 AM – noon/);
+    assert.match(f.pickup_details.note, /pickup 9:00 AM – 12:00 PM/);
 
     const later = order();
 
@@ -382,7 +400,7 @@ describe("buildOrder", () => {
     const g = buildOrder(later, "CUST", cfg).fulfillments[0];
 
     assert.equal(g.pickup_details.pickup_at, "2026-10-07T17:30:00.000Z");
-    assert.match(g.pickup_details.note, /pickup 1:30 – 3 PM/);
+    assert.match(g.pickup_details.note, /pickup 1:30 – 3:00 PM/);
   });
 
   it("sends the hours the farm confirmed, as the email tells them " +
@@ -394,7 +412,7 @@ describe("buildOrder", () => {
     const f = buildOrder(o, "CUST", cfg).fulfillments[0].pickup_details;
 
     assert.equal(f.pickup_at, "2026-10-07T14:00:00.000Z");
-    assert.match(f.note, /pickup 10 AM – noon/);
+    assert.match(f.note, /pickup 10:00 AM – 12:00 PM/);
   });
 
   it("builds pickup_at from New York time on both sides of the " +

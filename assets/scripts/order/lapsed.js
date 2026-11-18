@@ -4,7 +4,7 @@
 // now. It pays nothing: "Use this" puts the choice on the form and the
 // customer pays again with the same button. Draft wording.
 
-import { fullWindowLabel } from "./lib/schedule.mjs";
+import { windowLabel } from "./lib/schedule.mjs";
 import { appendWhole } from "../utils/keep-together.mjs";
 
 // Keyed by the form's way: `scheduled` is scheduled pickup, the drop site
@@ -92,7 +92,7 @@ export class Lapsed {
         // The time in full, as on the form's radios (#616), kept
         // on one line after the day.
         value: `${d.date}|${w.id}`, text: `${d.label}, `,
-        kept: fullWindowLabel(w),
+        kept: windowLabel(w),
       })))
       : dates.map((d) => ({
         value: d.value || d.date, text: d.text || d.label,

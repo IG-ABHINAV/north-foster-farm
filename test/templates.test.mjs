@@ -1,3 +1,15 @@
+// Criteria copy of test/templates.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/templates.criteria.mjs test/templates.test.mjs
+//
+// Changed: every pickup and delivery window, "between"
+// lines included. The confirmed hours of a pre-W11d record
+// ("11 AM – 1 PM", "9 – 11 AM") stay out of scope.
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -71,7 +83,7 @@ describe("the order details block", () => {
     assert.doesNotMatch(m.text, /\$60|Subtotal|Bulk discount|Delivery fee/);
     assert.match(m.text, /Order type: Delivery\n/);
     assert.match(m.text,
-      /- Arrives: Thursday, October 8, between 10 AM and 4 PM/);
+      /- Arrives: Thursday, October 8, between 10:00 AM and 4:00 PM/);
     assert.match(m.text, /- Address: 1 Main St, Foster, RI 02825/);
   });
 
@@ -79,7 +91,8 @@ describe("the order details block", () => {
     const farm = orderConfirmed(order("onfarm"), { links });
 
     assert.match(farm.text, /Order type: On-farm pickup\n/);
-    assert.match(farm.text, /- When: Thursday, October 8, 9 AM – noon/);
+    assert.match(farm.text,
+      /- When: Thursday, October 8, 9:00 AM – 12:00 PM/);
     assert.match(farm.text, /- Where: 99 East Killingly Road, Foster, RI/);
     assert.doesNotMatch(farm.text, /Arrives:|Address:/);
 
@@ -90,7 +103,7 @@ describe("the order details block", () => {
 
     assert.match(drop.text, /Order type: Pickup days\n/);
     assert.match(drop.text,
-      /- When: Saturday, October 17, between 10 and 11 AM/);
+      /- When: Saturday, October 17, between 10:00 and 11:00 AM/);
     assert.match(drop.text, /- Where: 46 Institute Lane/);
   });
 });
@@ -230,7 +243,8 @@ describe("order confirmed", () => {
 
     has(m.text, "Thanks, Pat. We received your payment of $62, and your " +
       "pickup time is set. Your order is confirmed.");
-    assert.match(m.text, /- When: Thursday, October 8, 9 AM – noon\n/);
+    assert.match(m.text,
+      /- When: Thursday, October 8, 9:00 AM – 12:00 PM\n/);
     assert.doesNotMatch(m.text, /not a booking|Requested:/);
     has(m.text, `View or edit this order: ${url}`);
     has(m.text, `Reschedule pickup: ${url}`);
@@ -243,7 +257,7 @@ describe("order confirmed", () => {
 
     legacy.fulfilment.onfarm = { window: "afternoon" };
     assert.match(orderConfirmed(legacy, { links }).text,
-      /- When: Thursday, October 8, 1 – 5 PM\n/);
+      /- When: Thursday, October 8, 1:00 – 5:00 PM\n/);
     legacy.fulfilment.onfarm.confirmed = { from: 11, to: 13 };
     assert.match(orderConfirmed(legacy, { links }).text,
       /- When: Thursday, October 8, 11 AM – 1 PM\n/);
@@ -254,7 +268,7 @@ describe("a booked pickup time (W11d)", () => {
   it("gives the farm nothing to confirm on the new order", () => {
     const m = farmOrderPlaced(order("onfarm"), { links });
 
-    has(m.text, "- When: Thursday, October 8, 9 AM – noon");
+    has(m.text, "- When: Thursday, October 8, 9:00 AM – 12:00 PM");
     assert.doesNotMatch(m.text, /Pickup time:|Requested|orders confirm|deny/);
   });
 
@@ -264,7 +278,7 @@ describe("a booked pickup time (W11d)", () => {
     assert.equal(m.subject, "Pickup moved: NFF-2610-ABCD");
     has(m.text, "Pat Example moved order NFF-2610-ABCD to a new pickup " +
       "time.");
-    has(m.text, "Now: Thursday, October 8, 9 AM – noon");
+    has(m.text, "Now: Thursday, October 8, 9:00 AM – 12:00 PM");
     assert.doesNotMatch(m.text, /orders confirm|confirming/);
     assert.doesNotMatch(m.text, /View order:|View customer/);
     has(m.text, "Admin: https://admin.example.com");
@@ -280,7 +294,8 @@ describe("scheduled pickup emails", () => {
       const m = orderConfirmed(market(), { links });
 
       has(m.text, "Order type: Pickup days");
-      has(m.text, "- When: Sunday, October 25, between 9 AM and 1 PM");
+      has(m.text, "- When: Sunday, October 25, between 9:00 AM and " +
+        "1:00 PM");
       has(m.text, "- Where: Foster Farmers Market, Shady Acres Diner, " +
         "164 Danielson Pike, Foster");
     });
@@ -292,7 +307,8 @@ describe("scheduled pickup emails", () => {
 
       assert.match(m.subject, /, pickup at Pop-up at The Village Family/);
       has(m.text, "- Pickup: Pop-up at The Village Family Fitness");
-      has(m.text, "- When: Sunday, October 18, between 10 AM and 2 PM");
+      has(m.text, "- When: Sunday, October 18, between 10:00 AM and " +
+        "2:00 PM");
     });
 
   it("names a drop site by its place in the farm's subject (#490)",
@@ -320,7 +336,7 @@ describe("scheduled pickup emails", () => {
     });
 
     has(m.text, "Before: 46 Institute Lane");
-    has(m.text, "Saturday, October 17, between 10 and 11 AM");
+    has(m.text, "Saturday, October 17, between 10:00 and 11:00 AM");
     has(m.text, "- Where: Foster Farmers Market, Shady Acres Diner");
   });
 
@@ -406,7 +422,7 @@ describe("the monitoring emails", () => {
         "hasn't chosen another yet, oldest order first.");
     assert.match(m.text, /Order\s+Customer\s+Was\s+Waiting\n/);
     assert.match(m.text, new RegExp("NFF-2610-EFGH\\s+Pat Example\\s+" +
-        "Thursday, October 8, 9 AM – noon\\s+24 h"));
+        "Thursday, October 8, 9:00 AM – 12:00 PM\\s+24 h"));
     assert.doesNotMatch(m.text, /\bunpaid\b|orders confirm/);
     has(m.text, "Admin: https://admin.example.com");
 
@@ -522,10 +538,11 @@ describe("the monitoring emails", () => {
     assert.match(m.html,
       /<li>Pack:<ul style="[^"]*padding-left:1.25em"><li>2 × Whole Chicken/);
     has(m.text, "\nDrop site, Saturday, October 17, 46 Institute Lane, " +
-      "North Scituate, RI 02857, 10 – 11 AM (1)\n");
+      "North Scituate, RI 02857, 10:00 – 11:00 AM (1)\n");
     has(m.text, "\nNFF-2610-DROP, Pat Example, paid");
     has(m.text, "\nOn-farm pickups (1)\n");
-    has(m.text, "\nNFF-2610-FARM, Pat Example, 9 AM – noon, paid");
+    has(m.text, "\nNFF-2610-FARM, Pat Example, 9:00 AM – 12:00 PM, " +
+      "paid");
 
     // A pickup confirmed before W11d shows its hours; a delivery unpaid
     // from
@@ -609,7 +626,7 @@ describe("delivery reminder", () => {
 
     assert.equal(m.subject, "Your delivery is tomorrow");
     has(m.text, "Tomorrow is delivery day! Your order will arrive between " +
-      "10 AM and 4 PM.");
+      "10:00 AM and 4:00 PM.");
     assert.match(m.text, /- Leave your cooler with ice outside in the morning/);
     assert.match(m.text, /- Provide gate or door codes, if needed/);
     has(m.text, "We'll look for your cooler here: Side porch.\n");
@@ -1128,7 +1145,8 @@ describe("the farm's own notices", () => {
     const m = farmOrderPlaced(reachable("onfarm"), { links });
 
     assert.match(m.text, /Order type: On-farm pickup\n/);
-    assert.match(m.text, /- When: Thursday, October 8, 9 AM – noon/);
+    assert.match(m.text,
+      /- When: Thursday, October 8, 9:00 AM – 12:00 PM/);
     assert.doesNotMatch(m.text, /prefers a call|Cooler/);
   });
 

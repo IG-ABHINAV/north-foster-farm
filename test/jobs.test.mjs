@@ -1,3 +1,13 @@
+// Criteria copy of test/jobs.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/jobs.criteria.mjs test/jobs.test.mjs
+//
+// Changed: the morning report's and the manifest's windows.
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -1011,7 +1021,8 @@ describe("runJobs", () => {
     assert.match(report[0].text, /Orders placed\s+3\s+🫥\n/, "the funnel");
     assert.match(report[0].text, /Paid by card or a wallet\s+3\s+🫥\n/);
     assert.match(report[0].text,
-      /\nA\s+Pat Example\s+Wednesday, October 7, 9 AM – noon\s+under an hour/);
+      new RegExp("\\nA\\s+Pat Example\\s+Wednesday, October 7, " +
+        "9:00 AM – 12:00 PM\\s+under an hour"));
     assert.doesNotMatch(report[0].text, /\bunpaid\b/, "no Paid column");
     assert.doesNotMatch(report[0].text, /orders confirm|Pickup schedule/,
       "the fixture's schedule reaches far enough");
@@ -1097,7 +1108,7 @@ describe("runJobs", () => {
     assert.equal(manifest.length, 1);
     assert.equal(manifest[0].subject,
       "Tomorrow, Wednesday, October 7: 1 order");
-    assert.match(manifest[0].text, /^B, Pat Example, 9 AM – noon/m);
+    assert.match(manifest[0].text, /^B, Pat Example, 9:00 AM – 12:00 PM/m);
     assert.doesNotMatch(manifest[0].text, /^A,/m, "A is Thursday");
 
     const thursdayEve = await runJobs(stores, {

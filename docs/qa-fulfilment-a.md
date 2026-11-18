@@ -113,7 +113,7 @@ its days and times.
 
 - [ ] The pickup day list has exactly the schedule's days from
       tomorrow on, a Saturday or a holiday included if listed; each
-      day's times appear as radios ("9 AM – noon") and change with the
+      day's times appear as radios ("9:00 AM – 12:00 PM") and change with the
       day.
 - [ ] `/account/#orders`: an on-farm order's card has no "we'll
       confirm" note, and "Paid with: Visa ending 1111" under the

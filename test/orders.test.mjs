@@ -1,3 +1,13 @@
+// Criteria copy of test/orders.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/orders.criteria.mjs test/orders.test.mjs
+//
+// Changed: the confirmation email's window.
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -682,7 +692,7 @@ describe("POST /api/orders with a card", () => {
     assert.equal(customer.length, 1);
     assert.equal(customer[0].subject, "Your order is confirmed");
     assert.match(customer[0].text,
-      /- When: Wednesday, October 7, 9 AM – noon/);
+      /- When: Wednesday, October 7, 9:00 AM – 12:00 PM/);
     assert.equal(farm.length, 1);
     assert.deepEqual(farm[0].to, ["farm@x.com"]);
     assert.match(farm[0].subject, /^New order NFF-.*: \$55, on-farm pickup$/);

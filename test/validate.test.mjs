@@ -1,3 +1,13 @@
+// Criteria copy of test/validate.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/validate.criteria.mjs test/validate.test.mjs
+//
+// Changed: the lapsed answer's window labels.
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -220,7 +230,7 @@ describe("on-farm pickup", () => {
       "That pickup time is no longer available.");
     assert.equal(r.dates[0].date, "2026-10-07");
     assert.deepEqual(r.dates[0].windows.map((w) => w.label),
-      ["9 AM – noon", "1 – 5 PM"]);
+      ["9:00 AM – 12:00 PM", "1:00 – 5:00 PM"]);
 
     // The morning gone from the 7th: the old morning is stale there.
     const left = validateOrder(base(), {

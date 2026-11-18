@@ -980,7 +980,7 @@ const T4 = "Removed items head the list under \"Removed\", as plain " +
   "what is still coming.";
 const W11D = "W11d (2026-09-28): a pickup is booked by paying, from " +
   "the farm\x27s schedule; no farm confirmation, and the window " +
-  "reads as its times (9 AM – noon).";
+  "reads as its times (9:00 AM – 12:00 PM, #616).";
 const WELCOME = "Writer2\x27s redraft of 2026-10-25 on James\x27s " +
   "structure (#400, comments 6404632787 and 6404652710): thanks for " +
   "joining, what to expect, the news and About pages to catch up on, " +

@@ -19,7 +19,7 @@ import {
   disallowedFor, normalizeCode, phoneOk, validateOrder, zipInfo,
 } from "./lib/validate.mjs";
 import {
-  fullWindowLabel, pickupTimes, windowLabel,
+  pickupTimes, windowLabel,
 } from "./lib/schedule.mjs";
 import { label, today } from "./lib/zoned.mjs";
 import { Cart, JOKE_CODE } from "./cart/cart.js";
@@ -1396,7 +1396,7 @@ export class OrderForm {
       input.value = w.id;
       input.checked = w.id === pick;
       text.htmlFor = input.id;
-      setWhole(text, fullWindowLabel(w));
+      setWhole(text, windowLabel(w));
       box.appendChild(node);
     }
     if (lists) this.wantedWindow = null;

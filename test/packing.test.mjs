@@ -1,3 +1,14 @@
+// Criteria copy of test/packing.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/packing.criteria.mjs test/packing.test.mjs
+//
+// Changed: the windows a slip and the email print. Added at
+// the end: an old-format printed snapshot is not a change.
+
 // The daily packing slips (#292). Every order here is fake.
 
 import assert from "node:assert/strict";
@@ -318,7 +329,7 @@ describe("changed and canceled orders", () => {
     const changes = changesBetween(before, after);
 
     assert.ok(changes.includes("Type: was Delivery, now On-farm pickup"));
-    assert.ok(changes.some((c) => /^Window: was 10 AM – 4 PM, now /
+    assert.ok(changes.some((c) => /^Window: was 10:00 AM – 4:00 PM, now /
       .test(c)));
     assert.ok(changes.includes("Contact details changed: see the new slip"));
     assert.ok(changes.includes("Total: was $37, now $32"));
@@ -703,7 +714,7 @@ describe("scheduled pickups in a packet", () => {
     assert.match(text, /\nDelivery, Thursday, October 8\n- C/);
     assert.match(text, /\nDrop site, Saturday, October 17, 46 Institute Lane/);
     assert.match(text, /\nFoster Farmers Market, Sunday, October 25, Shady/);
-    assert.match(text, /9 AM – 1 PM\n- B\b/);
+    assert.match(text, /9:00 AM – 1:00 PM\n- B\b/);
     assert.doesNotMatch(text, /Market pickup/);
   });
 });
@@ -1079,5 +1090,70 @@ describe("the 3 PM packet the day before (#515)", () => {
     assert.equal(report.packingEve.slips, 1);
     assert.ok(h.sent.some((m) => m.subject.startsWith(
       "Packing slips for tomorrow, Thursday, October 8")));
+  });
+});
+
+// #616's shared label (2026-11-18). A slip printed before the deploy
+// keeps its snapshot as stored, the window in the old format ("9 AM –
+// noon"). The snapshot is not rewritten and its shape does not change;
+// the comparison treats the same times in either format as the same.
+describe("a printed snapshot from before the full format (#616)", () => {
+  const sched = (id, occurrence, date) => order(id, {
+    method: "scheduled", date,
+    fulfilment: { method: "scheduled", occurrence, date, onfarm: null,
+      delivery: null },
+  });
+
+  // Each way of getting an order, with the window its snapshot held
+  // when the slip was printed in the old format.
+  const OLD = [
+    ["on-farm", order("F", { method: "onfarm" }), "9 AM – noon"],
+    ["scheduled", sched("D", "VFVQ-261017", "2026-10-17"), "10 – 11 AM"],
+    ["delivery", order("V"), "10 AM – 4 PM"],
+  ];
+
+  const printedAs = (o, window) => new Map([[o.id, {
+    snapshot: { ...snapshotOf(o), window },
+  }]]);
+
+  it("an old-format printed snapshot is not a change", () => {
+    for (const [kind, o, window] of OLD) {
+      const entries = choose({
+        open: [o], printed: printedAs(o, window), gone: [], day: TUESDAY,
+      });
+
+      assert.deepEqual(entries.map((e) => e.kind), [],
+        `${kind}: "${window}" printed, the same times now`);
+    }
+  });
+
+  it("a real change of time still shows, the new time in the full format",
+    () => {
+      const moved = order("F", { method: "onfarm" });
+
+      moved.fulfilment.onfarm = {
+        window: "13:00-17:00", from: "13:00", to: "17:00",
+      };
+
+      const entries = choose({
+        open: [moved], printed: printedAs(moved, "9 AM – noon"), gone: [],
+        day: TUESDAY,
+      });
+
+      assert.deepEqual(entries.map((e) => e.kind), ["changed"]);
+      assert.ok(entries[0].changes.includes(
+        "Window: was 9 AM – noon, now 1:00 – 5:00 PM"
+      ), JSON.stringify(entries[0].changes));
+    });
+
+  it("changesBetween never prints a line whose only difference is the " +
+    "format", () => {
+    for (const [kind, o, window] of OLD) {
+      const now = snapshotOf(o);
+      const changes = changesBetween({ ...now, window }, now);
+
+      assert.deepEqual(changes.filter((c) => /^Window:/.test(c)), [],
+        `${kind}: "${window}" against "${now.window}"`);
+    }
   });
 });

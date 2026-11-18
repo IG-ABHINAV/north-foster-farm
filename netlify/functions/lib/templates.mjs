@@ -411,7 +411,7 @@ const orderType = (order) => {
 };
 
 // The pickup window for a labelled line: "Thursday, October 8,
-// 9 AM – noon".
+// 9:00 AM – 12:00 PM".
 const windowPhrase = (order) =>
   `${label(order.fulfilment.date)}, ${pickupWindow(order)}`;
 
@@ -2213,7 +2213,7 @@ const PACKET_KIND = {
 
 // What a packet or report groups under: "Foster Farmers Market,
 // Sunday, October 25, Shady Acres Diner, 164 Danielson Pike, Foster,
-// 9 AM – 1 PM". The farm's own name for the series, never the
+// 9:00 AM – 1:00 PM". The farm's own name for the series, never the
 // customer's "Scheduled pickup".
 const occasion = (order) => {
   const w = placeOf(order);

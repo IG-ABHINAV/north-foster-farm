@@ -1111,7 +1111,7 @@ Manual: automatable; not yet written.
   2. Choose Scheduled pickup and read its pickups.
 - **Assert:** On-farm: exactly the schedule's days from tomorrow on
   (a Saturday or holiday included if listed), and under Pickup time
-  that day's windows as radios, "9 AM – noon". Scheduled pickup: no
+  that day's windows as radios, "9:00 AM – 12:00 PM". Scheduled pickup: no
   date list but one radio per occurrence `/api/dates` lists in
   `scheduled`, by date, each "<day>, <hours>, <place>, <town>": every
   date with a `pickup` line in `PICKUP_SCHEDULE` from today through
@@ -2806,7 +2806,7 @@ the drop site's pay is `payment.spec.mjs`.
 - **Setup:** 1 egg, its next Saturday.
 - **Test:**
   1. Choose Scheduled pickup and the drop site's day; pay.
-- **Assert:** The when line "<day>, 10 – 11 AM, at the drop site."
+- **Assert:** The when line "<day>, 10:00 – 11:00 AM, at the drop site."
   (never "Scituate drop site"). No reminder is sent for a scheduled
   pickup, and the order closes the day after its date.
 - **Teardown:** As PY-01.

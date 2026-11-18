@@ -160,12 +160,41 @@ export const snapshotOf = (order) => {
 // and a `scheduled` one are the same kind.
 const kindOf = (snap) => (isScheduled(snap) ? "scheduled" : snap.method);
 
+// A window's times, however its label was written: "9 AM – noon"
+// (slips printed before #616) and "9:00 AM – 12:00 PM" are both
+// "09:00-12:00". A stored snapshot keeps its label as printed; only the
+// comparison reads through it. Anything else comes back as it is.
+const END = /^(?:(noon|midnight)|(\d{1,2})(?::(\d{2}))?(?:\s*([AP]M))?)$/i;
+
+export const windowTimes = (window) => {
+  const ends = String(window || "").split(/\s*–\s*/)
+    .map((end) => END.exec(end.trim()));
+
+  if (ends.length !== 2 || ends.some((m) => !m)) return window;
+
+  const half = (m) => (m[1]
+    ? { noon: "PM", midnight: "AM" }[m[1].toLowerCase()]
+    : m[4] && m[4].toUpperCase());
+  const shared = half(ends[1]);
+  const time = (m) => {
+    const pm = (half(m) || shared) === "PM";
+    const hour = m[1] ? 12 : Number(m[2]);
+
+    return `${String((hour % 12) + (pm ? 12 : 0)).padStart(2, "0")}:${
+      m[3] || "00"}`;
+  };
+
+  return shared ? ends.map(time).join("-") : window;
+};
+
 // A snapshot printed before it carried the occurrence has no such key;
 // that alone is not a change. Nor is the farm's name for the place (a
-// series renamed), or the old and new spelling of a scheduled method.
+// series renamed), the old and new spelling of a scheduled method, or
+// the old and new writing of the same window (#616).
 const same = (a, b) => {
   const strip = (s, drop) => ({
     ...s, method: kindOf(s), name: undefined,
+    window: windowTimes(s.window),
     ...drop && { occurrence: undefined },
   });
 
@@ -205,7 +234,7 @@ export const changesBetween = (before, after) => {
   if (before.date !== after.date) {
     out.push(`Date: was ${label(before.date)}, now ${label(after.date)}`);
   }
-  if (before.window !== after.window) {
+  if (windowTimes(before.window) !== windowTimes(after.window)) {
     out.push(`Window: was ${before.window || "none"}, now ${
       after.window || "none"}`);
   }

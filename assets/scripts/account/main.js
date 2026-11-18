@@ -6,7 +6,7 @@
 import { mergeScheduled } from "../order/lib/group.mjs";
 import { perkSentence } from "../order/lib/perks.mjs";
 import {
-  fullWindowLabel, pickupTimes, windowLabel,
+  pickupTimes, windowLabel,
 } from "../order/lib/schedule.mjs";
 import { dollars } from "../order/lib/totals.mjs";
 import { forgetCustomer } from "../order/draft.js";
@@ -69,8 +69,9 @@ const hour12 = (h) => meridiem(((h + 11) % 12) + 1, h < 12 ? "AM" : "PM");
 // The drop site's series code (data/series.json), set by the page.
 let dropSeries = "";
 
-// "10 – 11 AM, at the drop site" or "9 AM – 1 PM, at Foster Farmers
-// Market": the window, then the place, as the order page reads it.
+// "10:00 – 11:00 AM, at the drop site" or "9:00 AM – 1:00 PM, at
+// Foster Farmers Market": the window, then the place, as the order
+// page reads it.
 const at = ({ window, name, series }) => [
   window, `at ${series && series === dropSeries ? "the drop site" : name}`,
 ].filter(Boolean).join(", ");
@@ -1675,7 +1676,7 @@ class Account {
 
       input.value = w.id;
       input.checked = w.id === pick;
-      if (w.from && w.to) setWhole(qs(node, "span"), fullWindowLabel(w));
+      if (w.from && w.to) setWhole(qs(node, "span"), windowLabel(w));
       else write(qs(node, "span"), w.label);
       box.appendChild(node);
     }

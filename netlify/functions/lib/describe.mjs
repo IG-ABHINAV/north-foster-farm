@@ -11,9 +11,10 @@ import {
 } from "../../../assets/scripts/order/lib/dates.mjs";
 import { company } from "./company.mjs";
 
-// "10:00 AM – 4:00 PM" -> "10 AM and 4 PM", for "between ... and ...".
+// "10:00 AM – 4:00 PM" -> "10:00 AM and 4:00 PM", for
+// "between ... and ...".
 export const between = (window) =>
-  window.replace(/:00/g, "").split(/\s*–\s*/).join(" and ");
+  window.split(/\s*–\s*/).join(" and ");
 
 // What the customer reads. The drop site, every market and every pop-up
 // are one choice (draft wording); `placeOf(order).name` is the farm's
@@ -37,7 +38,7 @@ const hoursRange = (from, to) => {
     : `${h(from)} ${m(from)} – ${h(to)} ${m(to)}`;
 };
 
-// "9 AM – noon": the window booked. A record from before W11d may
+// "9:00 AM – 12:00 PM": the window booked. A record from before W11d may
 // carry the range the farm confirmed inside its window; that wins.
 export const pickupWindow = (order) => {
   const o = order.fulfilment.onfarm || {};
@@ -58,9 +59,6 @@ export const streetAddress = (a = {}) => [
 // The farm as the email footer writes it.
 const FARM = `${company.address.short || company.address.street}, ${
   company.address.city}, ${company.address.state} ${company.address.zip}`;
-
-// "10:00 AM – 4:00 PM" -> "10 AM – 4 PM", the way pickup windows read.
-const hours = (window) => window.replace(/:00/g, "");
 
 // A packet's counts: "4 slips (1 revised), 1 cancelled", a zero part
 // left out, and "No slips, 1 cancelled" when nothing is to pack.
@@ -86,7 +84,7 @@ export const placeOf = (order) => {
   const f = order.fulfilment;
   const of = {
     delivery: () => ({
-      window: hours(terms.delivery.window),
+      window: terms.delivery.window,
       place: streetAddress(f.delivery || {}),
     }),
     // An occurrence gone from the data never reads as the farm or the
@@ -97,7 +95,7 @@ export const placeOf = (order) => {
       return o
         ? {
           occurrence: o.id, site: o.series, siteName: o.name, kind: o.kind,
-          window: hours(o.window), place: o.place,
+          window: o.window, place: o.place,
           address: withoutName(o.place, o.name),
         }
         : {

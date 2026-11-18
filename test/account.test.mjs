@@ -1,3 +1,13 @@
+// Criteria copy of test/account.test.mjs for #616's shared label
+// (2026-11-18): the same file with every window label in the full
+// format ("9:00 AM – 12:00 PM", "between 10:00 and 11:00 AM").
+// Held out of `npm test` by its name until windowLabel takes the new
+// format; the implementer turns it on, over the live file, with
+//
+//   git mv -f test/account.criteria.mjs test/account.test.mjs
+//
+// Changed: the moved pickup's email window.
+
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
@@ -491,7 +501,7 @@ describe("changeOrder", () => {
 
     assert.match(customer.at(-1).subject, /updated/);
     assert.match(customer.at(-1).text,
-      /- When: Wednesday, October 7, 1 – 5 PM/);
+      /- When: Wednesday, October 7, 1:00 – 5:00 PM/);
     assert.equal(farm.length, 1);
     assert.match(farm[0].subject, /^Pickup moved: A/);
     assert.doesNotMatch(farm[0].text, /orders confirm/);

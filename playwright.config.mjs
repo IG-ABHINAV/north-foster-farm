@@ -127,7 +127,8 @@ export default defineConfig({
     // of layout, accessibility and the cart's motion frame by frame
     // (#559), where a WebKit-only fault shows, and the account's tab
     // row (#592), and the width of the spaces the account page keeps
-    // in a pair (#598), and the Membership tab's layout (#602, #601).
+    // in a pair (#598), and the Membership tab's layout (#602, #601),
+    // and a badge's tooltip after a scroll (#644).
     // cart-motion skips itself in the other projects.
     {
       name: "iphone",
@@ -135,6 +136,7 @@ export default defineConfig({
         "**/overflow.spec.mjs", "**/a11y.spec.mjs", "**/keyboard.spec.mjs",
         "**/payment-stacking.spec.mjs", "**/cart-keyboard.spec.mjs",
         "**/cart-a11y.spec.mjs", "**/cart-motion.spec.mjs",
+        "**/cart-tip.spec.mjs",
         "**/account-tabs.spec.mjs", "**/keep-together.spec.mjs",
         "**/membership-layout.spec.mjs",
       ],

@@ -11,7 +11,7 @@
 // or <waivers.json> marks an argument that is a file, and a flag
 // followed by one (`--out <file>`) takes a file.
 
-const WORD = /^[a-z][a-z-]*(?:\|[a-z][a-z-]*)*$/;
+const WORD = /^[a-z][a-z0-9-]*(?:\|[a-z][a-z0-9-]*)*$/;
 const FILEISH = /^<(?:csv|file|dir|path)[^>]*>$|^<[^>|]*\.(?:json|csv)>$/;
 const FLAGS = /--([a-z][a-z0-9-]*)(=?)/g;
 const FLAG_FILE = /--([a-z][a-z0-9-]*)\s+(<[^>]*>)/g;

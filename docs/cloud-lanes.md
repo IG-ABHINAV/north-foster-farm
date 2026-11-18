@@ -117,6 +117,33 @@ and the run reports as `e2e-named`, never as the required `e2e`.
 Without `specs`, the run is the full suite twice plus the burn-in,
 about 18 jobs.
 
+### `bin/nff e2e` composes that dispatch (#610, 2026-11-18)
+
+Push the branch, then run `bin/nff e2e` in its worktree. It diffs the
+branch against `origin/next` (`--base=<ref>` for another), looks each
+changed path up in `e2e/dispatch.json`, prints the specs and pages it
+chose and the path behind each, dispatches `e2e.yml` with those specs,
+waits (one look every 3 minutes) and exits 0 on a pass. On a failure
+it prints the run's link and one line per failing test: file, line,
+name, the site page when the name carries one, and the Playwright
+projects it failed on. Nothing about passing tests. `--dry-run` stops
+after the choice. Specs (`e2e/...`) or pages (`/...`) named on the
+command line skip the table, and `--all` takes every spec the table
+names, still as named specs. It never sends an empty `specs`, which
+would be the full suite. It prints pages without dispatching them
+until `e2e.yml` takes a `pages` input; `dispatchInputs` in
+`bin/e2e/dispatch.mjs` is the one place to add it.
+
+The table maps globs to specs and pages. A path that matches a
+`shared` glob (the page frame, site-wide styles and scripts, data,
+the functions, the build, the e2e helpers and workflows), or no glob
+at all, selects every spec, so a new file runs everything until it is
+mapped. The table is shared itself, so a change to it runs everything.
+A new page or spec goes into the table in the same change;
+`test/e2e-dispatch.test.mjs` fails on a spec the table leaves out, and
+`test/e2e-dispatch-table.test.mjs` on a partial or module that a shared
+file reaches but the table does not share.
+
 A spec that needs to show a picture on an issue saves it under
 `test-results/` (`page.screenshot({ path: ... })` with a path there). A
 passing named-specs run uploads every `test-results/**/*.png` except the
@@ -217,8 +244,10 @@ here instead of restating it (2026-11-01, #494).
    his look at `staging`.
 3. **e2e on `next`: only the specs the new code is expected to touch
    directly.** Name them in the lane report or the landing comment and
-   run them by name on a lane branch (`gh workflow run e2e.yml --ref
-   <branch> -f specs="..."`).
+   run them by name on a lane branch: `bin/nff e2e` chooses and
+   dispatches them (above, under "Checks"; 2026-11-18, #610: was a
+   hand-composed `gh workflow run e2e.yml --ref <branch> -f
+   specs="..."`).
 4. **One full staging run per release candidate, not one per push**
    (#519). A release candidate is the `staging` commit meant for
    `main`: the release's work has landed and James has looked at it.

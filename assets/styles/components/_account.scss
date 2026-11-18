@@ -1041,6 +1041,12 @@
     }
   }
 
+  // James's note under the section's paragraph (#608) sits closer
+  // to it than one paragraph does to the next.
+  .account-member-code .zip-note {
+    margin-top: -0.75rem;
+  }
+
   .account-member-code-badge {
     position: absolute;
     top: 50%;

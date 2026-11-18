@@ -205,6 +205,12 @@ h6 {
   font-size: 0.875rem;
 }
 
+// The same aside in bold, for the one thing to act on: the countdown
+// on the order form and the member's note on the Membership tab (#608).
+.zip-note-strong {
+  font-weight: bold;
+}
+
 // The same aside in the yellow, for something to attend to.
 .zip-note-warning {
   border-left-color: var(--bs-warning);

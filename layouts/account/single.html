@@ -109,9 +109,10 @@
                  aloud, the key tag and the download are left out.
                  Display only: the server, the CLI and the key tag's
                  page are as they were, and `memberCode = true` under
-                 params.features brings the rest back. The heading and
-                 the paragraph are James's words; the image's name is
-                 a draft. main.js moves this and Leave the group into
+                 params.features brings the rest back. The heading, the
+                 paragraph and the note after it, in the order
+                 countdown's style, are James's words (#608); the
+                 image's name is a draft. main.js moves this and Leave the group into
                  the member's own group. */}}
             {{ $live := site.Params.features.memberCode }}
             <section class="account-group account-member-code" aria-labelledby="mem-code-h" data-mem-code hidden>
@@ -128,7 +129,8 @@
                 <a class="btn btn-outline-primary" id="mem-code-download" href="/api/membership/code?download=1" download>Download QR code</a>
               </div>
               {{ else }}
-              <p>Coming soon: scan your code when you make a purchase in person (like at a farmers market), and your membership benefits will apply automatically. <strong>In the meantime, let us know you are a member at checkout, and we'll look up your membership by name or email.</strong></p>
+              <p>Scan your code when you make a purchase in person (like at a farmers market), and your membership benefits will apply automatically.</p>
+              <p class="zip-note zip-note-strong">In the meantime, let us know that you're a member at checkout, and we'll look up your membership by name or email.</p>
               <div class="account-member-code-soon">
                 <img class="account-membership-qr account-member-code-qr" id="mem-code-qr" alt="Your membership QR code, not in use yet" width="296" height="296" hidden>
                 <span class="account-status account-member-code-badge">Coming soon</span>

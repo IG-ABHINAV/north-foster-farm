@@ -19,7 +19,8 @@
 // eases on its own CSS transition, is taken out; that resting place
 // may itself move only while its transition runs (James's 23px drop).
 // A move whose whole ease fell between two frames is held to the
-// travel of its eases instead (missed, #635).
+// travel of its eases instead (missed, #635), and a resting place
+// whose whole transition did, to that transition's (missedRest).
 //
 // No Playwright import: the unit tests load it (test/e2e-curve.test.mjs).
 
@@ -265,6 +266,33 @@ const missed = (f, g) => {
   }, { down: 0, across: 0 });
 };
 
+// How far the resting place may have moved on transitions a frame pair
+// missed whole, or null when it may not have moved unseen at all. The
+// floating pane's `bottom` eases on a CSS transition of its own
+// (_cart.scss), 420 ms, which the same starved frames can miss from
+// its start to its end. The later frame keeps the transitions begun
+// since the first (`restBegan`) and how many ran to their end
+// (`restEnded`). A step is allowed only when:
+// - at least one transition of `bottom` began between the two frames,
+//   and as many ran to their end, so none was cut off or still runs;
+// - neither frame showed one running (`resting`; offRest asks only
+//   then): a transition seen on a frame is judged by that frame;
+// - each is shorter than the gap between the frames;
+// - the step is within their travel, from their keyframes. Where the
+//   recorder could not read them (the transition was over before its
+//   event came), its travel is from the first frame's resting place,
+//   where it began, to the later's, where it ended: its having run to
+//   its end is what holds it then.
+const missedRest = (f, g) => {
+  const began = g.restBegan || [];
+
+  if (!began.length || (g.restEnded || 0) < began.length) return null;
+  if (began.some((e) => !(g.t - f.t > e.duration))) return null;
+  if (began.some((e) => !e.keys)) return Infinity;
+
+  return began.reduce((sum, e) => sum + travelOf(e.keys).down, 0);
+};
+
 // The first frame pair, outside any move, in which an edge moved more
 // than `step` px, or than the eases the pair missed can move it
 // (missed), or the floating pane's resting place moved with no
@@ -282,11 +310,20 @@ export const offRest = (frames, { step = 8, px = 1 } = {}) => {
     const rest = floating ? (g.bottom || 0) - (f.bottom || 0) : 0;
 
     if (floating && !f.resting && !g.resting && Math.abs(rest) > step + px) {
-      return {
-        at: i + 1,
-        why: `the pane's resting place moved ${rest.toFixed(1)}px in one `
-          + "frame with no ease",
-      };
+      const may = missedRest(f, g);
+
+      if (may === null || Math.abs(rest) > may + px) {
+        return {
+          at: i + 1,
+          why: may === null
+            ? `the pane's resting place moved ${rest.toFixed(1)}px in one `
+              + "frame with no ease"
+            : `the pane's resting place moved ${rest.toFixed(1)}px in one `
+              + `frame, more than the ${may.toFixed(1)}px its ease begun `
+              + `between the two (${Math.round(g.t - f.t)}ms apart, none `
+              + "seen) moves",
+        };
+      }
     }
 
     for (const [part, edges] of Object.entries(EDGES)) {

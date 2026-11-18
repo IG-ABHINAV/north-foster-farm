@@ -277,3 +277,68 @@ describe("a move the frames missed", () => {
     assert.match(offRest(frames).why, /jumped 20\.0px.*at most 8/);
   });
 });
+
+// The floating pane's resting place on its own CSS transition of
+// `bottom`, 420 ms, missed whole between two frames (#635): the
+// minimized pane rises 20px as the toolbar's gap grows.
+describe("a resting place the frames missed", () => {
+  const rise = (keys = [{ bottom: "0px" }, { bottom: "20px" }]) => ({
+    duration: 420, keys,
+  });
+  const missedRise = (opts = {}) => {
+    const { began = [rise()], gap = 500 } = opts;
+    const ended = opts.ended ?? began.length;
+
+    return [
+      frame({ top: 516, bottom: 0, t: 0 }),
+      frame({
+        top: 496, bottom: 20, t: gap, restBegan: began, restEnded: ended,
+      }),
+      frame({ top: 496, bottom: 20, t: gap + 200 }),
+    ];
+  };
+
+  it("still fails a move with no transition begun", () => {
+    const off = offRest(missedRise({ began: [] }));
+
+    assert.equal(off.at, 1);
+    assert.match(off.why, /resting place moved 20\.0px .* with no ease/);
+  });
+
+  it("still judges a transition seen on a frame by that frame", () => {
+    const frames = [
+      frame({ top: 516, bottom: 0, t: 0 }),
+      frame({ top: 476, bottom: 10, resting: true, t: 200 }),
+      frame({ top: 476, bottom: 20, t: 500 }),
+    ];
+
+    // The pane's top went 40px up for 10 of rest: 30px it had no ease
+    // for.
+    assert.match(offRest(frames).why, /pane's top jumped -30\.0px/);
+  });
+
+  it("passes a whole transition missed between two far-apart frames",
+    () => {
+      assert.equal(offRest(missedRise()), null);
+      // Over before its event came: its keyframes are gone, and its
+      // having run to its end holds it.
+      assert.equal(offRest(missedRise({
+        began: [{ duration: 420, keys: null }],
+      })), null);
+    });
+
+  it("fails a move larger than the transition's travel", () => {
+    const short = rise([{ bottom: "0px" }, { bottom: "10px" }]);
+    const off = offRest(missedRise({ began: [short] }));
+
+    assert.match(off.why, /moved 20\.0px .* more than the 10\.0px/);
+  });
+
+  it("exempts nothing when the frames were close enough to see it", () => {
+    assert.match(offRest(missedRise({ gap: 400 })).why, /with no ease/);
+  });
+
+  it("exempts nothing for a transition cut off or still running", () => {
+    assert.match(offRest(missedRise({ ended: 0 })).why, /with no ease/);
+  });
+});

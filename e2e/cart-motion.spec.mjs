@@ -190,6 +190,48 @@ const record = (page) => page.evaluate(() => {
 
     return a;
   };
+  // Every ease of the floating pane's resting place (its `bottom`, on a
+  // CSS transition of its own) as it begins and as it ends, for the
+  // next frame: `restBegan` with its length and, where the transition
+  // can still be read, its keyframes, and `restEnded`, how many ran to
+  // their end (#635: one can begin and end between two frames). The
+  // events come in the browser's animation update, before the frame's
+  // own callback.
+  let restBegan = [];
+  let restEnded = 0;
+  const seconds = (v) => (/ms$/.test(v) ? parseFloat(v) : parseFloat(v) * 1e3);
+  const restLength = () => {
+    const s = getComputedStyle(pane);
+    const props = s.transitionProperty.split(",").map((p) => p.trim());
+    const lengths = s.transitionDuration.split(",");
+    const k = props.indexOf("bottom");
+
+    return k < 0 ? null : seconds(lengths[k % lengths.length].trim());
+  };
+  const onRest = (e) => {
+    if (e.target !== pane || e.propertyName !== "bottom") return;
+    if (e.type === "transitionend") {
+      restEnded += 1;
+
+      return;
+    }
+
+    const run = pane.getAnimations()
+      .find((a) => a.transitionProperty === "bottom");
+
+    restBegan.push({
+      duration: run ? Number(run.effect.getTiming().duration) : restLength(),
+      keys: run ? run.effect.getKeyframes() : null,
+    });
+  };
+
+  window.cartRestOff?.();
+  pane.addEventListener("transitionrun", onRest);
+  pane.addEventListener("transitionend", onRest);
+  window.cartRestOff = () => {
+    pane.removeEventListener("transitionrun", onRest);
+    pane.removeEventListener("transitionend", onRest);
+  };
   // The move this frame is in, from the page's own record of it, read
   // in the same frame as the boxes: its number (pane.eases, one a
   // moveParts), how far into it the clock is, its length and its curve
@@ -235,6 +277,8 @@ const record = (page) => page.evaluate(() => {
       }).filter((a) => a.id === "cart-move").length,
       move: moveOf(),
       began,
+      restBegan,
+      restEnded,
       // Where the floating pane rests over the screen's foot, and
       // whether that eases now (_cart.scss, the sheet's bottom).
       bottom: parseFloat(s.bottom) || 0,
@@ -284,6 +328,8 @@ const record = (page) => page.evaluate(() => {
       tip: box(tip),
     });
     began = [];
+    restBegan = [];
+    restEnded = 0;
     beats = 0;
     turn = 0;
     window.cartTick = requestAnimationFrame(tick);
@@ -313,6 +359,7 @@ const recorded = async (page, order) => {
     cancelAnimationFrame(window.cartTick);
     clearTimeout(window.cartBeat);
     Element.prototype.animate = window.cartAnimate;
+    window.cartRestOff?.();
 
     return window.cartFrames;
   });

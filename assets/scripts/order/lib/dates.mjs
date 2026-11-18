@@ -28,7 +28,9 @@ export const onFarmDates = (now, terms, schedule = []) =>
       windows: windows.map((w) => ({ ...w, label: windowLabel(w) })),
     }));
 
-// The Wednesday-noon cutoff that governs a delivery Thursday.
+// The cutoff that governs a delivery day: noon the day before,
+// Wednesday for a Thursday (and Tuesday for a Wednesday moved there,
+// #640).
 export const cutoffFor = (iso, terms) => {
   const { cutoffHour, weekday: day, cutoffWeekday } = terms.delivery;
   const back = (day - cutoffWeekday + 7) % 7;
@@ -179,15 +181,33 @@ export const orderOccurrence = (terms, f) => {
   return id ? occurrenceFor(terms, id) : null;
 };
 
-// The next delivery Thursdays whose cutoff has not passed. The cutoff
-// itself is inclusive: an order at exactly 12:00:00 still makes it.
-export const deliveryDates = (now, terms, count) => {
+// The Monday of a date's week, as an ISO date.
+const mondayOf = (iso) => addDays(iso, -((weekday(iso) + 6) % 7));
+
+// Whether a date is a delivery day: the one rule (#640). A week
+// (Monday to Sunday) with a delivery line in the schedule delivers on
+// that line's date alone; any other week on its Thursday, unless a
+// holiday. A schedule without `deliveries` moves nothing.
+export const isDeliveryDay = (iso, terms, schedule) => {
+  const moved = (schedule && schedule.deliveries) || [];
+  const week = mondayOf(iso);
+  const line = moved.find((m) => mondayOf(m.date) === week);
+
+  if (line) return line.date === iso;
+
+  return weekday(iso) === terms.delivery.weekday && !isHoliday(iso, terms);
+};
+
+// The next delivery days whose cutoff has not passed, each week's
+// Thursday or the day the schedule moves it to. The cutoff itself is
+// inclusive: an order at exactly 12:00:00 still makes it.
+export const deliveryDates = (now, terms, count, schedule) => {
   const wanted = count || terms.delivery.datesToOffer;
   const start = today(now, terms.timeZone);
   const out = [];
 
   for (let d = addDays(start, 1), i = 0; out.length < wanted && i < 60; i++) {
-    if (weekday(d) === terms.delivery.weekday && !isHoliday(d, terms)) {
+    if (isDeliveryDay(d, terms, schedule)) {
       const cutoff = cutoffFor(d, terms);
 
       if (now.getTime() <= cutoff.getTime()) {
@@ -204,7 +224,7 @@ export const deliveryDates = (now, terms, count) => {
 export const allDates = (now, terms, schedule) => ({
   now: now.toISOString(),
   onfarm: onFarmDates(now, terms, schedule),
-  delivery: deliveryDates(now, terms),
+  delivery: deliveryDates(now, terms, undefined, schedule),
   scheduled: scheduledDates(now, terms, schedule),
 });
 

@@ -3,7 +3,9 @@
 // money or dates is trusted.
 
 import { archived } from "./catalog.mjs";
-import { datesFor, occurrenceFor } from "./dates.mjs";
+import {
+  cutoffFor, datesFor, isDeliveryDay, occurrenceFor,
+} from "./dates.mjs";
 import { legacyOccurrence } from "./events.mjs";
 import { moneyOn } from "./money-on.mjs";
 import { perkEffects } from "./perks.mjs";
@@ -88,6 +90,9 @@ export const findCode = (value, codes) => {
 // schedule has opened.
 // `kept` is the occurrence the order already holds: the customer's own
 // edit may keep it, though no customer could choose it now.
+// `keptDate` is the delivery day the order already holds: the
+// customer's own edit may keep it until its cutoff, though the farm
+// has since moved that week's delivery to another day (#640).
 // `waive.minimum` lets a delivery under the minimum through, and
 // `waive.fee` takes the delivery fee off: the caller has checked the
 // customer's pass (lib/passes.mjs, #182), and the order says it used
@@ -112,7 +117,7 @@ export const findCode = (value, codes) => {
 export const validateOrder = (payload, {
   index, terms, now, group, codes, code, lock = null, deliverTo = null,
   credit = 0, schedule = [], held = {}, waive = {}, placed = null,
-  farm = false, kept = null, perks = [],
+  farm = false, kept = null, keptDate = null, perks = [],
 }) => {
   const errors = {};
   const p = payload && typeof payload === "object" ? payload : {};
@@ -312,10 +317,15 @@ export const validateOrder = (payload, {
     // customer's own edit of it, though no longer offered to choose.
     const holding = method === "scheduled" && occurrence === kept
       ? occurrenceFor(terms, occurrence) : null;
+    // So does a delivery Thursday the schedule has since replaced, until
+    // its cutoff (#640): a placed order's date never moves by itself.
+    const replaced = method === "delivery" && keptDate && date === keptDate
+      && isDeliveryDay(date, terms) && !isDeliveryDay(date, terms, schedule)
+      && now.getTime() <= cutoffFor(date, terms).getTime();
     const day = method === "scheduled"
       ? (dates.find((d) => d.occurrence === occurrence)
         || (holding && { date: holding.date }))
-      : dates.find((d) => d.date === date);
+      : dates.find((d) => d.date === date) || (replaced && { date });
     // A date sent with an occurrence must be the occurrence's own.
     const mismatch = method === "scheduled" && day && date
       && date !== day.date && posted === "scheduled";

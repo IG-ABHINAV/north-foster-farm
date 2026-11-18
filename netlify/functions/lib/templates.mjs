@@ -19,14 +19,15 @@ import catalog from "../../../data/catalog.json" with { type: "json" };
 import aliases from "../../../data/skuAliases.json" with { type: "json" };
 import terms from "./terms.mjs";
 import {
-  isScheduled, orderOccurrence,
+  isDeliveryDay, isScheduled, orderOccurrence,
 } from "../../../assets/scripts/order/lib/dates.mjs";
+import { pickupSchedule } from "./pickups.mjs";
 import { dollars } from "../../../assets/scripts/order/lib/totals.mjs";
 import {
   current, indexCatalog,
 } from "../../../assets/scripts/order/lib/catalog.mjs";
 import {
-  addDays, dayName, label, today,
+  addDays, dayName, label, today, weekday,
 } from "../../../assets/scripts/order/lib/zoned.mjs";
 import { GUIDE, RUNBOOK_ALERTS } from "./alerts-guide.mjs";
 import { company } from "./company.mjs";
@@ -38,10 +39,27 @@ import {
   currentOptIn, dueOn, keptFee, paymentsOf,
 } from "./records.mjs";
 
-// The delivery day by name, and how long a missed delivery is
-// held for the customer to choose, from data/delivery.json.
-const DELIVERY_DAY = dayName(terms.delivery.weekday);
+// How long a missed delivery is held for the customer to choose, from
+// data/delivery.json.
 const HOLD_DAYS = terms.delivery.holdDays;
+
+// A delivery day as the miss emails name it: "next Thursday, October
+// 15" when it is the same day a week on, else "on Wednesday, November
+// 25" (a week the schedule moved, #640, or a holiday skipped).
+const deliveryOn = (from, date) => (addDays(from, 7) === date
+  ? `next ${dayName(weekday(date))}, ${label(date).replace(/^\w+, /, "")}`
+  : `on ${label(date)}`);
+
+// The first delivery day after `date`, as the functions' schedule has
+// it (admin's nextDeliveryDay, which imports this file).
+const deliveryAfter = (date) => {
+  const schedule = pickupSchedule();
+  let d = addDays(date, 1);
+
+  while (!isDeliveryDay(d, terms, schedule)) d = addDays(d, 1);
+
+  return d;
+};
 
 // A small count in words, as the emails write it: 7 is "seven".
 const inWords = (n) => [
@@ -644,7 +662,7 @@ export const missedDelivery = (order, {
   const fee = keptFee(order);
   const { date } = order.fulfilment;
   const { late, day } = missedOn(date, now);
-  const next = dayAfter(date, 7);
+  const next = deliveryOn(date, deliveryAfter(date));
   const hold = label((order.question && order.question.until)
     || addDays(date, HOLD_DAYS));
   const items = dollars(order.totals.total - fee);
@@ -659,7 +677,7 @@ export const missedDelivery = (order, {
     blocks.push(
       p("Please choose what you'd like us to do:"),
       list([
-        `Deliver it next ${DELIVERY_DAY}, ${next}, for another ` +
+        `Deliver it ${next}, for another ` +
           "delivery fee " +
           `of ${dollars(fee)}`,
         "Have it ready for on-farm pickup or one of our pickup days, at " +
@@ -676,7 +694,7 @@ export const missedDelivery = (order, {
     blocks.push(
       p("Please choose what you'd like us to do:"),
       list([
-        `Deliver it next ${DELIVERY_DAY}, ${next}, at no extra charge`,
+        `Deliver it ${next}, at no extra charge`,
         "Have it ready for on-farm pickup or one of our pickup days",
         `Cancel it for a full refund of ${dollars(order.totals.total)}`,
       ]),
@@ -703,7 +721,10 @@ export const movedDelivery = (order, {
   const a = order.attempted || {};
   const date = order.fulfilment.date;
   const next = addDays(a.date, 7) === date;
-  const when = next ? `next ${DELIVERY_DAY}` : DELIVERY_DAY;
+  // The day it moved to by its own name: a week the schedule moved
+  // delivers on another weekday (#640).
+  const dayOf = dayName(weekday(date));
+  const when = next ? `next ${dayOf}` : dayOf;
   const title = `Your delivery has moved to ${next ? when : label(date)}`;
   const { day } = missedOn(a.date, now);
   const why = a.cause === "weather"

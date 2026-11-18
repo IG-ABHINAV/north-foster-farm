@@ -208,6 +208,8 @@ export const planEdit = async (stores, order, body, {
       : null,
     deliverTo: buying ? terms.model.location(buying.location) || null : null,
     kept: modelled(terms, order.fulfilment).occurrence || null,
+    keptDate: order.fulfilment.method === "delivery"
+      ? order.fulfilment.date : null,
     held: Object.fromEntries(order.lines.map((l) => [l.sku, l.qty])),
     waive: {
       minimum: !!order.pass,

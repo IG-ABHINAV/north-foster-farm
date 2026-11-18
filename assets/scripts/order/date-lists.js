@@ -79,15 +79,19 @@ export class DateLists {
 
   // The farm's pickup windows as the validator takes them, rebuilt from
   // the lists: the page never holds the schedule itself. Each scheduled
-  // pickup on offer comes back as the `pickup` line that opened it.
+  // pickup on offer comes back as the `pickup` line that opened it, and
+  // each delivery day on offer as a delivery line, so a week the farm
+  // moved (#640) checks against its own day.
   schedule() {
     const windows = ((this.lists && this.lists.onfarm) || []).flatMap((d) =>
       (d.windows || []).map((w) => ({ date: d.date, ...w })));
     const lines = ((this.lists && this.lists.scheduled) || []).map((d) => ({
       date: d.date, code: d.series, action: "pickup",
     }));
+    const deliveries = ((this.lists && this.lists.delivery) || [])
+      .map((d) => ({ date: d.date }));
 
-    return Object.assign(windows, { lines });
+    return Object.assign(windows, { lines, deliveries });
   }
 
   // The first load, and a Try again: the date fields show their

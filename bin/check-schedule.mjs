@@ -2,7 +2,8 @@
 // Fails the deploy when the pickup schedule would fail a customer
 // (W11d, James's amendments 2 and 3): PICKUP_SCHEDULE missing, empty
 // or malformed, every window past, not reaching the week after next,
-// or an occurrence of a series left without its line. Netlify runs it
+// an occurrence of a series left without its line, or a delivery line
+// that is malformed, doubled in a week or on a holiday. Netlify runs it
 // in every build command; a failed build leaves the last good deploy
 // live. bin/nff schedule runs the same check before it sets the
 // variable.
@@ -14,11 +15,12 @@ import { readFileSync } from "node:fs";
 
 import terms from "../netlify/functions/lib/terms.mjs";
 import { checkSchedule } from "../assets/scripts/order/lib/schedule.mjs";
+import { movedSummary } from "./schedule-env.mjs";
 
 const file = process.argv[2];
 const raw = file ? readFileSync(file, "utf8") : process.env.PICKUP_SCHEDULE;
 const result = checkSchedule(raw, {
-  timeZone: terms.timeZone, model: terms.model,
+  timeZone: terms.timeZone, model: terms.model, holidays: terms.holidays,
 });
 
 if (!result.ok) {
@@ -30,7 +32,9 @@ if (!result.ok) {
 
 const count = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const days = new Set(result.windows.map((w) => w.date)).size;
+const moved = movedSummary(result.deliveries);
 
 console.log(`Pickup schedule: ${count(result.windows.length, "window")} ` +
   `on ${count(days, "day")}, through ${result.last}, and ${
-    count(result.lines.length, "occurrence line")}.`);
+    count(result.lines.length, "occurrence line")}${
+    moved ? `; ${moved}` : ""}.`);

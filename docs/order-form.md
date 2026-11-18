@@ -405,8 +405,29 @@ skipped rather than shifted:
   build cannot read the production orders store (docs/monitoring.md),
   so the occurrences real orders name are checked by
   `bin/nff orders occurrences`, which fails on any that is gone.
-- Delivery: the next two non-holiday Thursdays whose Wednesday-noon
-  cutoff has not passed. The cutoff is inclusive.
+- Delivery: the next two delivery days whose cutoff, noon the day
+  before, has not passed. The cutoff is inclusive. A week's delivery
+  day (Monday to Sunday) is its Thursday unless a holiday, or the day
+  a delivery line in `PICKUP_SCHEDULE` moves it to (#640), the window
+  unchanged. To move Thanksgiving week's to Wednesday, add the line
+  to the schedule file
+
+  ```
+  2026-11-25 delivery
+  ```
+
+  and run `bin/nff schedule check <file>`, then
+  `bin/nff schedule set <file> --production` (and deploy). The check
+  names each moved week ("delivery moved to Wednesday, November 25")
+  and refuses anything after the word, two lines in one week, and a
+  line on a holiday; `schedule set` then counts the paid deliveries
+  still on each replaced Thursday, which the farm moves
+  (`bin/nff orders move`) or tells. One rule decides a day,
+  `isDeliveryDay` in `lib/dates.mjs`, and every reader follows it:
+  the dates offered, the server's checks of an order and an edit,
+  the page's own check (`DateLists.schedule()`, from `/api/dates`),
+  the farm's moves and the next day after a miss, the emails,
+  reminders, manifest and slips. A week without a line is as before.
 
 Delivery ZIPs: on the approved list passes; an unlisted `028`/`029` ZIP
 passes and flags the order for follow-up; anything else is blocked.

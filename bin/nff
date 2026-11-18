@@ -39,7 +39,9 @@ import {
   ENVIRONMENTS, readSample, readValues, sampleFile,
 } from "./env/sample.mjs";
 import { verifyEnv } from "./env/verify.mjs";
-import { setSchedule } from "./schedule-env.mjs";
+import {
+  checkedSchedule, paidOnReplaced, setSchedule,
+} from "./schedule-env.mjs";
 import { shipLog } from "./ship-log.mjs";
 import { USAGE as E2E_USAGE, e2eCommand } from "./e2e/dispatch.mjs";
 import {
@@ -613,12 +615,13 @@ const [
   },
   { dollars, toCents },
   { snapshot },
-  { dueOn, keptFee, paidTotal, refundedTotal, refundsOf },
+  {
+    allOrders, dueOn, keptFee, paidTotal, refundedTotal, refundsOf,
+  },
   { library },
   review,
   { mailLinks },
   sourcemaps,
-  { checkSchedule },
   { alertTest },
   backup,
   maintenance,
@@ -651,7 +654,6 @@ const [
   import("../netlify/functions/lib/review.mjs"),
   import("../netlify/functions/lib/site.mjs"),
   import("../netlify/functions/lib/sourcemaps.mjs"),
-  import("../assets/scripts/order/lib/schedule.mjs"),
   import("../netlify/functions/lib/health.mjs"),
   import("../netlify/functions/lib/backup.mjs"),
   import("../netlify/functions/lib/maintenance.mjs"),
@@ -791,41 +793,12 @@ const signIn = async (email, open) => {
   }
 };
 
-// A schedule file, checked as a deploy checks it (W11d). -> { value,
-// summary }: the variable's value, one date per entry, and a line to
-// print. Throws with every problem.
-const checkedSchedule = (file) => {
+// A schedule file, checked as a deploy checks it (W11d): -> { value,
+// summary, deliveries } from checkedSchedule (bin/schedule-env.mjs).
+const scheduleFile = (file) => {
   if (!file) throw new Error("Which file? bin/nff schedule check <file>");
 
-  const r = checkSchedule(readFileSync(file, "utf8"), {
-    timeZone: terms.timeZone, model: terms.model,
-  });
-
-  if (!r.ok) {
-    throw new Error(`The schedule has ${r.errors.length} problem${
-      r.errors.length === 1 ? "" : "s"}:\n  ${r.errors.join("\n  ")}`);
-  }
-
-  const byDate = new Map();
-
-  for (const w of r.windows) {
-    byDate.set(w.date, [...(byDate.get(w.date) || []), w.id]);
-  }
-
-  const lines = r.lines.map((l) => `${l.date} ${l.code} ${l.action}${
-    l.id ? ` ${l.id}` : ""}`);
-
-  return {
-    value: [
-      ...[...byDate].map(([date, ids]) => `${date} ${ids.join(" ")}`),
-      ...lines,
-    ].join("; "),
-    summary: `${r.windows.length} window${
-      r.windows.length === 1 ? "" : "s"} on ${byDate.size} day${
-      byDate.size === 1 ? "" : "s"}, ${r.windows[0].date} through ${
-      r.last}, and ${lines.length} occurrence line${
-      lines.length === 1 ? "" : "s"}. It passes.`,
-  };
+  return checkedSchedule(readFileSync(file, "utf8"), { terms });
 };
 
 // The Netlify CLI, as the env file's site and token, for the one
@@ -1816,7 +1789,7 @@ const run = async () => {
   case "audience sync":
     return out(await syncAudience(stores, { dryRun: !!flags["dry-run"] }));
   case "schedule check": {
-    const checked = checkedSchedule(rest[0]);
+    const checked = scheduleFile(rest[0]);
 
     return out(checked.summary);
   }
@@ -1825,7 +1798,7 @@ const run = async () => {
       throw new Error("Say which: --staging or --production.");
     }
 
-    const checked = checkedSchedule(rest[0]);
+    const checked = scheduleFile(rest[0]);
     // Staging is the staging branch's deploys.
     const targets = context === "production"
       ? ["production"] : ["branch:staging"];
@@ -1833,6 +1806,18 @@ const run = async () => {
     await setSchedule(netlify, checked.value, targets,
       process.env.NETLIFY_SITE_ID);
     out(checked.summary);
+
+    // A Thursday a delivery line replaces may hold paid deliveries
+    // already: the farm moves them or the customers change them
+    // (#640). Read only; nothing is moved here.
+    const replaced = paidOnReplaced(await allOrders(stores),
+      checked.deliveries, terms);
+
+    for (const { date, replaced: from, ids } of replaced) {
+      out(`Delivery moved to ${date} from ${from}: ${ids.length} paid ` +
+        `delivery order${ids.length === 1 ? "" : "s"} still on ${from}${
+          ids.length ? ` (${ids.join(", ")})` : ""}.`);
+    }
     out(`Set PICKUP_SCHEDULE for ${targets.join(" and ")} on site ${
       process.env.NETLIFY_SITE_ID}, and read it back.`);
 

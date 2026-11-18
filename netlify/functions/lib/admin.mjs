@@ -6,7 +6,7 @@
 import terms from "../../../data/delivery.json" with { type: "json" };
 import { dollars } from "../../../assets/scripts/order/lib/totals.mjs";
 import {
-  addDays, today, weekday,
+  addDays, today,
 } from "../../../assets/scripts/order/lib/zoned.mjs";
 import {
   adjust, getCounts, hiddenCounts, hiddenInStock, setCount,
@@ -45,8 +45,9 @@ import {
 import { lastInteraction, quietDue } from "./retention.mjs";
 import siteTerms from "./terms.mjs";
 import {
-  isScheduled, orderOccurrence,
+  isDeliveryDay, isScheduled, orderOccurrence,
 } from "../../../assets/scripts/order/lib/dates.mjs";
+import { pickupSchedule } from "./pickups.mjs";
 
 import { forgetCustomer } from "./forget.mjs";
 
@@ -755,8 +756,9 @@ export const markAttempted = async (stores, id, {
   // Ours or the weather's: moved to the next delivery day, no fee, no
   // question (C7).
   if (!theirs) {
-    return moveDelivery(stores, id, nextDeliveryDay(order.fulfilment.date),
-      { now, env, mail, square, fetchImpl, email: "movedDelivery" });
+    return moveDelivery(stores, id, nextDeliveryDay(order.fulfilment.date,
+      pickupSchedule(env)),
+    { now, env, mail, square, fetchImpl, email: "movedDelivery" });
   }
 
   return tellMissed(stores, marked, { now, env, mail });
@@ -805,14 +807,12 @@ export const tellMissed = async (stores, order, {
     });
 };
 
-const isDeliveryDay = (date) => weekday(date) === terms.delivery.weekday
-  && !terms.holidays.includes(date);
-
-// The first delivery day after `date`.
-export const nextDeliveryDay = (date) => {
+// The first delivery day after `date`, a moved week's day included
+// (#640): the schedule as the functions read it.
+export const nextDeliveryDay = (date, schedule = pickupSchedule()) => {
   let d = addDays(date, 1);
 
-  while (!isDeliveryDay(d)) d = addDays(d, 1);
+  while (!isDeliveryDay(d, terms, schedule)) d = addDays(d, 1);
 
   return d;
 };
@@ -836,7 +836,8 @@ export const moveDelivery = async (stores, id, date, {
   if (!OPEN.includes(order.status)) {
     throw new Error(`This order is ${order.status}.`);
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !isDeliveryDay(date)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")
+    || !isDeliveryDay(date, terms, pickupSchedule(env))
     || date <= today(now, terms.timeZone)) {
     throw new Error("Move it to a delivery day after today (YYYY-MM-DD).");
   }

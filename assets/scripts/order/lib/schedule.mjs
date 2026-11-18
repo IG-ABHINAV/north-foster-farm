@@ -22,6 +22,14 @@
 //   2026-11-15 K4Q7 attend
 //   2026-11-22 K4Q7 skip
 //
+// A delivery line moves one week's delivery off its Thursday (#640).
+// The date is that week's delivery day, Monday to Sunday, with the
+// usual window (data/delivery.json) and its cutoff noon the day
+// before. Nothing follows the word; one line a week, and never on a
+// holiday (checkSchedule refuses that, given the holidays):
+//
+//   2026-11-25 delivery
+//
 // Times are the farm's wall clock (America/New_York), 24-hour.
 
 import {
@@ -66,20 +74,26 @@ const parseRange = (text) => {
   return { id: text, from: `${fh}:${fm}`, to: `${th}:${tm}` };
 };
 
-// The raw text -> { windows, lines, errors }. `windows` is sorted by
-// date and start, one entry per window: { date, id, from, to }.
-// `lines` holds the occurrence lines: { date, code, action } or
-// { date, code, action, id, from, to } for a narrower window. Every
+// This week's Monday, as an ISO date.
+const monday = (iso) => addDays(iso, -((weekday(iso) + 6) % 7));
+
+// The raw text -> { windows, lines, deliveries, errors }. `windows` is
+// sorted by date and start, one entry per window: { date, id, from,
+// to }. `lines` holds the occurrence lines: { date, code, action } or
+// { date, code, action, id, from, to } for a narrower window.
+// `deliveries` holds the delivery lines by date, { date } each. Every
 // problem is reported, not only the first.
 export const parseSchedule = (raw) => {
   const errors = [];
   const windows = [];
   const lines = [];
+  const deliveries = [];
   const text = typeof raw === "string" ? raw : "";
 
   if (!text.trim()) {
     return {
-      windows, lines, errors: ["PICKUP_SCHEDULE is missing or empty."],
+      windows, lines, deliveries,
+      errors: ["PICKUP_SCHEDULE is missing or empty."],
     };
   }
 
@@ -98,6 +112,15 @@ export const parseSchedule = (raw) => {
     }
     if (!ranges.length) {
       errors.push(`"${entry}": give the date at least one time range.`);
+      continue;
+    }
+    if (ranges[0] === "delivery") {
+      if (ranges.length > 1) {
+        errors.push(`"${entry}": a delivery line is the date and the ` +
+          `word alone, like "${date} delivery".`);
+      } else {
+        deliveries.push({ date });
+      }
       continue;
     }
     if (!RANGE.test(ranges[0])) {
@@ -156,11 +179,19 @@ export const parseSchedule = (raw) => {
     }
   }
 
-  return { windows, lines, errors };
-};
+  deliveries.sort((a, b) => a.date.localeCompare(b.date));
 
-// This week's Monday, as an ISO date.
-const monday = (iso) => addDays(iso, -((weekday(iso) + 6) % 7));
+  for (let i = 1; i < deliveries.length; i += 1) {
+    const [a, b] = [deliveries[i - 1], deliveries[i]];
+
+    if (monday(a.date) === monday(b.date)) {
+      errors.push(`${a.date} and ${b.date}: one delivery line a week ` +
+        "(Monday to Sunday).");
+    }
+  }
+
+  return { windows, lines, deliveries, errors };
+};
 
 // The first day the schedule must reach: the Monday of the week after
 // next.
@@ -241,13 +272,21 @@ const missingErrors = (lines, model, now, timeZone) => {
 
 // Everything a deploy needs of the schedule (amendments 2 and 3): it
 // parses, has the right shape, still offers something, and reaches
-// into the week after next. -> { ok, windows, errors, last }.
+// into the week after next. -> { ok, windows, lines, deliveries,
+// errors, last }.
 //
 // `model` (lib/events.mjs) holds the occurrence lines to the data, and
 // requires a line for every occurrence the coverage window holds.
+// `holidays` (data/delivery.json's) refuses a delivery line on one.
 export const checkSchedule = (raw, { now = new Date(), timeZone,
-  model } = {}) => {
-  const { windows, lines, errors } = parseSchedule(raw);
+  model, holidays = [] } = {}) => {
+  const { windows, lines, deliveries, errors } = parseSchedule(raw);
+
+  for (const { date } of deliveries) {
+    if (holidays.includes(date)) {
+      errors.push(`${date}: a holiday, so no delivery can move onto it.`);
+    }
+  }
   const day = today(now, timeZone);
   const last = windows.length ? windows[windows.length - 1].date : null;
 
@@ -270,7 +309,7 @@ export const checkSchedule = (raw, { now = new Date(), timeZone,
       `window is on ${last}.`);
   }
 
-  return { ok: !errors.length, windows, lines, errors, last };
+  return { ok: !errors.length, windows, lines, deliveries, errors, last };
 };
 
 // The last day offered: the Saturday of the week after this one, weeks

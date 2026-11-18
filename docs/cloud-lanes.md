@@ -339,7 +339,11 @@ prints the plan and changes nothing.
    and `staging` at `main`'s commit. It asks first, since the staging
    site then shows production's content (`--yes` answers for a
    script), and refuses unless both branches contain `main`, the
-   working tree is clean and no `hotfix/*` branch exists.
+   working tree is clean and no `hotfix/*` branch exists. It goes on
+   only if its own push created both placeholders: a second `start`
+   that overlaps the first refuses there and deletes nothing.
+   Both commands take `--dry-run` and `--yes` bare; `--dry-run=false` or
+   `--yes=no` is refused before anything runs.
 2. The hotfix lands on `next` by its pull request and goes to
    `staging` and `main` by `bin/nff promote`, with the usual checks.
 3. `bin/nff hotfix finish` refuses until `main` has moved and `next`,
@@ -353,7 +357,14 @@ prints the plan and changes nothing.
    where the placeholders changed nothing, it must match `main`. It
    refuses to push, naming the path, when either fails. Where both
    changed a path, it shows how the rebuild differs from the
-   placeholder and asks, even with `--yes`; a no refuses. It names
+   placeholder and from `main`, names each such path where the
+   rebuild matches the placeholder as dropping the hotfix's change,
+   and asks, even with `--yes`; a no refuses (2026-11-18, #631's
+   second review: only the first difference was shown, so a dropped
+   hotfix came up as an empty diff). `--dry-run` works the rebuild
+   out in memory and names the conflict it would stop on, or, once a
+   conflict is resolved and staged, the paths it would refuse or
+   drop the hotfix in. It names
    each commit dropped because `main` has a copy of it, and each the
    rebuild emptied otherwise. Then it force-pushes `next` to the rebuilt
    staging and keeps the rebuilt next as `hotfix/rebuilt`. `staging`
@@ -374,7 +385,10 @@ the copy it saves to `nff-hotfix-ruleset-25361439.json` in the git
 common directory (`.git/` of the main checkout) before it narrows the
 ruleset to `main` alone. After the push, failed or not, it restores
 that copy, up to three tries, and reads it back; Ctrl-C, SIGTERM and
-SIGHUP restore it too before the command exits. The file goes once
+SIGHUP restore it too before the command exits. A signal before the
+push keeps the push from starting; one during it cannot, so the
+message says the push may have gone through and to run the command
+with `--dry-run` to see where things stand. The file goes once
 the read-back matches. A read-back that differs is an error naming
 the ruleset, and the file stays. The second `finish` only
 fast-forwards and opens no window. Neither the "linear history"

@@ -37,8 +37,9 @@
 // "linear history" ruleset (25898866) is never written: a rebuilt
 // branch holds no merge commit.
 //
-// The tests of this contract are test/hotfix.test.mjs and
-// test/hotfix-round3.test.mjs (the security review of #631). Every git
+// The tests of this contract are test/hotfix.test.mjs,
+// test/hotfix-round3.test.mjs and test/hotfix-round4.test.mjs (the two
+// security reviews of #631). Every git
 // command goes through `deps.git` and every GitHub call through
 // `deps.api`, so the tests run real git against throwaway repositories.
 
@@ -119,10 +120,15 @@ export const USAGE = `
                                       nothing`
   .slice(1);
 
+// Output with -z is NUL-separated and kept whole: a path may begin or
+// end with whitespace. Other output loses only its trailing whitespace.
+export const tidy = (args, stdout) => (args.includes("-z")
+  ? String(stdout) : String(stdout).replace(/\s+$/, ""));
+
 const realGit = async (args) => {
   try {
-    return (await execute("git", args, { maxBuffer: 64 * 1024 * 1024 }))
-      .stdout.trim();
+    return tidy(args, (await execute("git", args,
+      { maxBuffer: 64 * 1024 * 1024 })).stdout);
   } catch (error) {
     throw Object.assign(new Error(printable(`git ${args.join(" ")}: ${
       String(error.stderr || error.message).trim()}`)), {
@@ -164,7 +170,6 @@ const short = (sha) => printable(String(sha).slice(0, 7));
 // "a", "a and b", "a, b and c".
 export const listed = (names) => (names.length > 1
   ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0] ?? "");
-const on = (value) => !!value && value !== "false";
 
 // What a failed git command said, fit for the terminal.
 const said = (error) => printable(String(error?.stderr || error?.message
@@ -368,8 +373,11 @@ const restoreSaved = async ({ api, sleep }, body, file) => {
 // `main` alone; the saved copy is written to `file` first, goes back
 // after the push whatever happens, on a signal too, and is read back.
 // Throws only before it narrows anything (the ruleset not whole, the
-// file already there). -> { pushError, rulesetError }.
-const window = async (deps, file, push) => {
+// file already there). A signal before the push starts stops it from
+// starting; one after cannot, so its message says the push may have
+// gone through. `action` names the command, for that message.
+// -> { pushError, rulesetError }.
+const window = async (deps, file, push, action) => {
   const { api, signals, out } = deps;
   const saved = await api(RULESET_PATH);
   const why = notWhole(saved);
@@ -386,6 +394,8 @@ const window = async (deps, file, push) => {
     { flag: "wx", mode: 0o600 });
 
   let restoring;
+  let stopping;
+  let pushing = false;
   const restore = () => {
     restoring ??= restoreSaved(deps, body, file);
 
@@ -393,9 +403,17 @@ const window = async (deps, file, push) => {
   };
   const handlers = Object.entries(SIGNALS).map(([signal, code]) => {
     const handler = () => {
+      stopping ??= signal;
+      // Whether the push had begun when the signal came.
+      const begun = pushing;
+
       restore().then((error) => {
-        out(error ? printable(error.message) : `Stopped by ${signal}: `
-          + `ruleset ${RULESET} is restored and read back.`);
+        out(`Stopped by ${signal} ${begun
+          ? "while the push ran, so it may have gone through"
+          : "before the push, so nothing was force-pushed"}. ${error
+          ? printable(error.message)
+          : `Ruleset ${RULESET} is restored and read back.`} Run bin/nff `
+          + `hotfix ${action} --dry-run to see where things stand.`);
       }).finally(() => signals.exit(code));
     };
 
@@ -406,8 +424,18 @@ const window = async (deps, file, push) => {
   let pushError;
   let rulesetError;
 
+  const halt = () => {
+    if (stopping) {
+      throw new Error(`Stopped by ${stopping} before the push: nothing was `
+        + "force-pushed.");
+    }
+  };
+
   try {
+    halt();
     await api(RULESET_PATH, { method: "PUT", body: narrowed(saved) });
+    halt();
+    pushing = true;
     await push();
   } catch (error) {
     pushError = error;
@@ -465,8 +493,47 @@ const QUESTION = (main) => `The staging site will show production's `
   + `content (main at ${short(main)}) from now until the second \`bin/nff `
   + "hotfix finish`. Start the hotfix?";
 
+// The refs `git push --porcelain` reports as created ("*") by that
+// push. One already there at the same commit is "=", not created.
+export const createdRefs = (output) => new Set(String(output ?? "")
+  .split("\n").map((line) => line.split("\t"))
+  .filter((f) => f.length >= 3 && f[0] === "*")
+  .map((f) => f[1].slice(f[1].lastIndexOf(":") + 1)));
+
+// Pushes the placeholders, and goes on only if this push created both
+// (the second review's B). A start that overlapped another (both
+// fetched before either pushed) pushes the same commits, which git
+// reports as up to date and a lease does not stop; that run refuses
+// here, so it never deletes the placeholders the other run made. Every
+// later deletion of them is by the run that created them.
+const keepPlaceholders = async (git, was) => {
+  const want = [PLACEHOLDER.next, PLACEHOLDER.staging]
+    .map((name) => `refs/heads/${name}`);
+  let output;
+
+  try {
+    output = await git(["push", "--porcelain", "--atomic", "origin",
+      `${was.next}:${want[0]}`, `${was.staging}:${want[1]}`]);
+  } catch (error) {
+    throw new Error(`Refused: pushing ${PLACEHOLDER.next} and `
+      + `${PLACEHOLDER.staging} failed (${said(error)}). Another hotfix start `
+      + "may have run: check origin's hotfix branches. next and staging did "
+      + "not move.", { cause: error });
+  }
+
+  const created = createdRefs(output);
+
+  if (!want.every((ref) => created.has(ref))) {
+    throw new Error(`Refused: another hotfix start ran: ${PLACEHOLDER.next} `
+      + `and ${PLACEHOLDER.staging} were already on origin, so this run did `
+      + "not create them and leaves them as they are. next and staging did "
+      + "not move. Nothing changed.");
+  }
+};
+
 // Deletes the placeholders, leased on the heads they were pushed at, so
-// a branch someone moved since is never deleted.
+// a branch someone moved since is never deleted. Only the run that
+// created them calls it.
 const dropPlaceholders = async ({ git, out }, was) => {
   try {
     await git(["push", "--atomic",
@@ -570,9 +637,7 @@ const start = async ({ dryRun, yes, out, file }, deps) => {
       + "again and answer yes, or pass --yes.");
   }
 
-  await git(["push", "--atomic", "origin",
-    `${next}:refs/heads/${PLACEHOLDER.next}`,
-    `${staging}:refs/heads/${PLACEHOLDER.staging}`]);
+  await keepPlaceholders(git, { next, staging });
   out(`Kept next (${short(next)}) as ${PLACEHOLDER.next} and staging `
     + `(${short(staging)}) as ${PLACEHOLDER.staging}.`);
 
@@ -580,7 +645,8 @@ const start = async ({ dryRun, yes, out, file }, deps) => {
 
   try {
     result = await window(deps, file,
-      () => forcePush(git, { next, staging }, { next: main, staging: main }));
+      () => forcePush(git, { next, staging }, { next: main, staging: main }),
+      "start");
   } catch (error) {
     // The window refused before it narrowed anything: nothing moved.
     await dropPlaceholders(deps, { next, staging });
@@ -629,7 +695,7 @@ const rebaseState = async (git) => {
 
       return {
         head: read("head-name").replace(/^refs\/heads\//, ""),
-        onto: read("onto"),
+        onto: read("onto"), path, todo: read("git-rebase-todo"),
       };
     }
   }
@@ -705,11 +771,13 @@ export const bothTouched = async (git, oldMain, main, head) => {
 // its placeholder (H), with old main (O) and main (M), compared path by
 // path. A path the hotfix did not touch (O = M) must be in R as in H; a
 // path no placeholder commit touched (O = H) must be in R as in M; a
-// path both touched where R differs from H or M is to be confirmed.
-// `p` holds the placeholders' and the rebuilt branches' heads, old main
-// and main now. -> { refused, confirm, dropped, emptied, flattened }:
-// refused [{ branch, path, why }], confirm [{ branch, head, paths }].
-export const compare = async (git, p) => {
+// path both touched where R differs from H or M is to be confirmed, and
+// of those, each where R equals H drops the hotfix's change (round 4,
+// A). `p` holds the placeholders' and the rebuilt branches' heads (or,
+// for a --dry-run, trees), old main and main now. -> { refused, confirm
+// }: refused [{ branch, path, why }], confirm [{ branch, head, rebuilt,
+// paths, dropping }].
+export const comparePaths = async (git, p) => {
   const hot = await changedPaths(git, p.oldMain, p.main);
   const refused = [];
   const confirm = [];
@@ -733,8 +801,21 @@ export const compare = async (git, p) => {
         paths.push(path);
       }
     }
-    if (paths.length) confirm.push({ branch, head, rebuilt, paths });
+    if (paths.length) {
+      confirm.push({
+        branch, head, rebuilt, paths,
+        dropping: paths.filter((path) => !fromHead.has(path)),
+      });
+    }
   }
+
+  return { refused, confirm };
+};
+
+// What comparePaths finds, and the commits the rebuild left out or
+// flattened. -> { refused, confirm, dropped, emptied, flattened }.
+export const compare = async (git, p) => {
+  const { refused, confirm } = await comparePaths(git, p);
 
   // What the rebuild left out of the placeholders: a patch-id copy of a
   // commit on main, or a commit the rebuild emptied.
@@ -751,6 +832,163 @@ export const compare = async (git, p) => {
       && !copies.has(c.sha) && !rebuilt.has(c.key)).map(named),
     flattened: commits.filter((c) => c.parents.length > 1).map(named),
   };
+};
+
+// The lines naming each path where a rebuilt branch is as its
+// placeholder, so the hotfix's change there is gone (round 4, A).
+const droppingLines = (x) => x.dropping.map((path) => `In the rebuilt `
+  + `${x.branch}, ${printable(path)} is as ${PLACEHOLDER[x.branch]} has it: `
+  + "the rebuild drops the hotfix's change there.");
+
+// --- the rebuild in memory, for --dry-run
+//
+// What the rebuild would make, as trees, with `git merge-tree`: it
+// writes objects only, never a ref, the index's entries, HEAD or a
+// rebase in progress. The same merge (ort) as the rebase, so the result
+// is the rebase's but for what a person resolves by hand.
+
+const treeOf = (git, rev) => git(["rev-parse", "--verify", "-q",
+  `${rev}^{tree}`]);
+
+// Replays `picks` (commits, oldest first) onto the tree `onto`. ->
+// { tree }, or { stop: { sha, files } } at the first conflict.
+const replay = async (git, onto, picks) => {
+  let tree = onto;
+
+  for (const sha of picks) {
+    let output;
+
+    try {
+      output = await git(["merge-tree", "--write-tree", "--no-messages",
+        "--name-only", "-z", `--merge-base=${sha}^^{tree}`, tree,
+        `${sha}^{tree}`]);
+    } catch (error) {
+      if (!error.stdout) throw error;
+
+      const [, ...files] = String(error.stdout).split("\0").filter(Boolean);
+
+      return { stop: { sha, files } };
+    }
+    tree = output.split("\0")[0];
+  }
+
+  return { tree };
+};
+
+const picksOf = async (git, args) => (await git(["rev-list", "--reverse",
+  "--no-merges", ...args])).split("\n").filter(Boolean);
+
+// The commits a rebase in progress has yet to pick, or undefined when
+// its list holds anything but picks.
+const leftToPick = async (git, state) => {
+  const picks = [];
+
+  for (const line of state.todo.split("\n").map((l) => l.trim())) {
+    if (!line || line.startsWith("#")) continue;
+
+    const m = line.match(/^(?:pick|p)\s+([0-9a-f]+)/);
+
+    if (!m) return undefined;
+    picks.push(await git(["rev-parse", "--verify", "-q", `${m[1]}^{commit}`]));
+  }
+
+  return picks;
+};
+
+// The rebuilt staging and next as trees, from where the checkout
+// stands. -> { staging, next }, { stop }, or { unknown: why }.
+const rebuildInMemory = async (git, state, { main, hs, hn }) => {
+  const ref = (name) => tryGit(git, ["rev-parse", "--verify", "-q",
+    `refs/heads/${name}`]);
+  let staging;
+  let next;
+
+  if (state) {
+    if (!state.path.endsWith("rebase-merge")) {
+      return { unknown: "the rebase in progress is not one this command "
+        + "started" };
+    }
+    if ((await git(["ls-files", "-u", "-z"])) !== "") {
+      return { unknown: "the conflict in progress is not yet resolved and "
+        + "staged" };
+    }
+
+    const picks = await leftToPick(git, state);
+
+    if (!picks) {
+      return { unknown: "the rebase in progress has steps other than picks" };
+    }
+
+    // The resolution as staged, then the commits left to pick.
+    const done = await replay(git, await git(["write-tree"]), picks);
+
+    if (done.stop) return done;
+    if (state.head === REBUILD.staging) {
+      staging = done.tree;
+    } else {
+      staging = await treeOf(git, REBUILD.staging);
+      next = done.tree;
+    }
+  } else {
+    const kept = await ref(REBUILD.staging);
+
+    if (kept && await isAncestor(git, main, kept)) {
+      staging = await treeOf(git, kept);
+
+      const keptNext = await ref(REBUILD.next);
+
+      if (keptNext && await isAncestor(git, kept, keptNext)) {
+        next = await treeOf(git, keptNext);
+      }
+    } else {
+      const done = await replay(git, await treeOf(git, main),
+        await picksOf(git, ["--cherry-pick", "--right-only",
+          `${main}...${hs}`]));
+
+      if (done.stop) return done;
+      staging = done.tree;
+    }
+  }
+  if (!staging) {
+    return { unknown: "the rebuilt staging is not in this checkout" };
+  }
+  if (!next) {
+    const done = await replay(git, staging, await picksOf(git,
+      [`${hs}..${hn}`]));
+
+    if (done.stop) return done;
+    next = done.tree;
+  }
+
+  return { staging, next };
+};
+
+// What --dry-run says of the rebuild's result, line by line.
+const previewRebuild = async (git, state, p) => {
+  let built;
+
+  try {
+    built = await rebuildInMemory(git, state, p);
+  } catch (error) {
+    return [`  the rebuild could not be worked out ahead: ${said(error)}`];
+  }
+  if (built.unknown) {
+    return [`  the rebuild's result is not known yet: ${built.unknown}`];
+  }
+  if (built.stop) {
+    return [`  stop on a conflict: ${short(built.stop.sha)} ${
+      await subjectOf(git, built.stop.sha)}, in ${built.stop.files
+      .map(printable).join(", ") || "files git has not named"}. Fix those `
+      + "files, git add them and run it again"];
+  }
+
+  const found = await comparePaths(git, { ...p, ...built });
+
+  return [
+    ...found.refused.map((x) => `  refuse: in the rebuilt ${x.branch}, ${
+      printable(x.path)}: ${x.why}`),
+    ...found.confirm.flatMap((x) => droppingLines(x).map((l) => `  ${l}`)),
+  ];
 };
 
 // Where the checkout was before finish began, kept until it is done.
@@ -847,6 +1085,14 @@ const finishFirst = async ({ dryRun, out, file }, deps, heads) => {
     out(`  show and ask you to confirm the paths the hotfix and the `
       + `placeholders both touched, even with --yes: ${
         both.map(printable).join(", ") || "none"}`);
+    if (state?.head === REBUILD.staging && state.onto
+      && state.onto !== main) {
+      out(`  refuse: the rebuild in progress is onto ${short(state.onto)}, `
+        + `and main is now ${short(main)}`);
+    } else {
+      for (const line of await previewRebuild(git, state,
+        { oldMain, main, hs, hn })) out(line);
+    }
     out(`  narrow ruleset ${RULESET} to main, force-push next to the `
       + `rebuilt staging and push the rebuilt next as ${REBUILT}, restore `
       + "the ruleset and read it back");
@@ -928,16 +1174,27 @@ const finishFirst = async ({ dryRun, out, file }, deps, heads) => {
   }
   if (found.confirm.length) {
     const paths = [...new Set(found.confirm.flatMap((x) => x.paths))].sort();
+    const drops = [...new Set(found.confirm.flatMap((x) => x.dropping))]
+      .sort();
+    const diff = async (from, to, these) => {
+      for (const line of (await git(["--literal-pathspecs", "diff",
+        "--no-color", "--no-ext-diff", "--no-textconv", from, to, "--",
+        ...these])).split("\n").filter(Boolean)) out(`  ${printable(line)}`);
+    };
 
     for (const x of found.confirm) {
       out(`How the rebuilt ${x.branch} differs from ${PLACEHOLDER[x.branch]}`
         + " where the hotfix and the placeholders both made changes:");
-      for (const line of (await git(["--literal-pathspecs", "diff",
-        "--no-color", "--no-ext-diff", "--no-textconv", x.head, x.rebuilt,
-        "--", ...x.paths])).split("\n")) out(`  ${printable(line)}`);
+      await diff(x.head, x.rebuilt, x.paths);
+      out(`How the rebuilt ${x.branch} differs from main there, which is `
+        + "what of the hotfix it lacks:");
+      await diff(main, x.rebuilt, x.paths);
+      for (const line of droppingLines(x)) out(line);
     }
     if (!await confirm(`The hotfix and the placeholders both changed ${
-      listed(paths.map(printable))}. Is the rebuild shown above right?`)) {
+      listed(paths.map(printable))}.${drops.length ? ` The rebuild drops `
+      + `the hotfix's change in ${listed(drops.map(printable))}.` : ""} Is `
+      + "the rebuild shown above right?")) {
       await putBack(git);
       throw new Error(`Refused: not confirmed. Nothing is pushed and the `
         + "placeholders stay. Run bin/nff hotfix finish again and resolve "
@@ -960,7 +1217,7 @@ const finishFirst = async ({ dryRun, out, file }, deps, heads) => {
   } else {
     result = await window(deps, file, () => git(["push", "--atomic",
       `--force-with-lease=refs/heads/next:${main}`, "origin",
-      `${rs}:refs/heads/next`, keep]));
+      `${rs}:refs/heads/next`, keep]), "finish");
   }
 
   if (!result.pushError) {
@@ -1012,8 +1269,16 @@ export const unproven = (runs) => REQUIRED.filter((name) => !runs.some(
 // either step 2 went through on a rebuilt staging that was `main`, or
 // step 1 left a rebuilt staging that is also the rebuilt next; the
 // rebuilt next holds a commit rebuilt from `hotfix/staging` (same
-// author, date and subject) only in the second. Unsure is "moved",
-// since only deleting never moves `staging`.
+// author, date and subject) only in the second. A misread either way
+// loses nothing (second review, question 7). Read as "moved", the run
+// only deletes the hotfix branches, leased, while `next` is
+// `hotfix/rebuilt` and holds all they did; `staging` waits at `main` for
+// an ordinary promote. Read as "not moved", which a commit of
+// `hotfix/next` that copies one of `hotfix/staging`'s (cherry-picked,
+// same author, date and subject) can cause after step 2 went through on
+// a rebuilt staging that was `main`, the run gates on the checks of
+// `next` and fast-forwards `staging` to it: the ordinary promotion of a
+// green `next`, after the same checks.
 const movedAlready = async (git, heads) => {
   const { main, next, staging } = heads;
   const hs = heads[PLACEHOLDER.staging];
@@ -1141,15 +1406,26 @@ const finish = async (options, deps) => {
 };
 
 // A flag the commands do not take, refused before anything is read
-// (round 3, E): a typo of --dry-run must never run for real. bin/nff
-// asks this too, before it routes. -> undefined, or the Error.
+// (round 3, E): a typo of --dry-run must never run for real. So is a
+// flag given a value (the second review's C): bin/nff keeps
+// `--dry-run=false` as the string "false", and `--yes=no` must not
+// count as yes. Only a bare flag, `true`, is taken. bin/nff asks this
+// too, before it routes. -> undefined, or the Error.
 export const flagRefusal = (action, flags = {}) => {
+  const what = `Refused: hotfix ${printable(action ?? "")}`;
   const unknown = Object.keys(flags).filter((name) => !FLAGS.includes(name));
 
-  return unknown.length ? new Error(`Refused: hotfix ${printable(action
-    ?? "")} takes only --dry-run and --yes, not ${unknown
-    .map((name) => `--${printable(name)}`).join(", ")}. Nothing changed.`)
-    : undefined;
+  if (unknown.length) {
+    return new Error(`${what} takes only --dry-run and --yes, not ${unknown
+      .map((name) => `--${printable(name)}`).join(", ")}. Nothing changed.`);
+  }
+
+  const valued = FLAGS.filter((name) => name in flags && flags[name] !== true);
+
+  return valued.length ? new Error(`${what} takes ${valued
+    .map((name) => `--${name}`).join(" and ")} bare, with no value, not ${
+    valued.map((name) => `--${name}=${printable(String(flags[name]))}`)
+      .join(", ")}. Nothing changed.`) : undefined;
 };
 
 export const hotfixCommand = async (action, rest, { flags = {}, out },
@@ -1168,7 +1444,7 @@ export const hotfixCommand = async (action, rest, { flags = {}, out },
   const d = { ...realDeps, ...deps, out };
   const file = await preflight(d);
   const options = {
-    dryRun: on(flags["dry-run"]), yes: on(flags.yes), out, file,
+    dryRun: flags["dry-run"] === true, yes: flags.yes === true, out, file,
   };
 
   return action === "start" ? start(options, d) : finish(options, d);

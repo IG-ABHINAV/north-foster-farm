@@ -2,7 +2,7 @@
 // the signed-in account and the order page's dates on a local build
 // as well as on staging, without signing in or creating anything.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { allDates } from "../../assets/scripts/order/lib/dates.mjs";
 import { buildModel } from "../../assets/scripts/order/lib/events.mjs";
@@ -157,12 +157,56 @@ export const keepHome = (page, baseURL) => page.route(
   },
 );
 
+// A sitemap's addresses, as URLs.
+export const sitemapLocs = (xml) => [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)]
+  .map(([, loc]) => new URL(loc));
+
 // The pages in the built site's sitemap, as paths.
 export const sitemap = async (request) => {
   const res = await request.get("/sitemap.xml");
 
   if (!res.ok()) throw new Error(`/sitemap.xml answered ${res.status()}`);
 
-  return [...(await res.text()).matchAll(/<loc>([^<]+)<\/loc>/g)]
-    .map(([, loc]) => new URL(loc).pathname);
+  return sitemapLocs(await res.text()).map((loc) => loc.pathname);
+};
+
+// Where bin/e2e/serve.mjs builds the site it serves.
+export const E2E_SITE = new URL("../../test-results/e2e-site/",
+  import.meta.url);
+
+// The same paths as sitemap(), read from disk when the tests are
+// collected, so a spec can make one test per page (#607). Only from
+// the build the suite is testing: e2e-run.yml builds and serves it
+// before Playwright starts, and serve.mjs builds it for its own port,
+// so its addresses carry the origin of E2E_BASE_URL. Anything else
+// (staging, a server on another port, no build) is null, and the spec
+// reads the sitemap at run time instead.
+export const builtSitemap = (baseURL,
+  file = new URL("sitemap.xml", E2E_SITE)) => {
+  if (!baseURL || !existsSync(file)) return null;
+
+  const origin = new URL(baseURL).origin;
+  const locs = sitemapLocs(readFileSync(file, "utf8"));
+
+  if (!locs.length || locs.some((loc) => loc.origin !== origin)) return null;
+
+  return locs.map((loc) => loc.pathname);
+};
+
+// The pages E2E_PAGES names (space-separated paths, "/about/ /"), in
+// the list's order, or the whole list when it is unset. A name not in
+// the list throws, so a typo can't make a run of no pages.
+export const namedPages = (paths, names = process.env.E2E_PAGES) => {
+  const wanted = (names || "").split(/\s+/).filter(Boolean);
+
+  if (!wanted.length) return paths;
+
+  const unknown = wanted.filter((name) => !paths.includes(name));
+
+  if (unknown.length) {
+    throw new Error(`E2E_PAGES names pages the walk doesn't have: ${
+      unknown.join(" ")}`);
+  }
+
+  return paths.filter((path) => wanted.includes(path));
 };

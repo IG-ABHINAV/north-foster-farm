@@ -27,13 +27,22 @@ import {
   FULL_CART, OrderPage, expect, test, unfoldCart,
 } from "./support/order.mjs";
 import {
-  ACCOUNT_TABS, cannedDates, keepHome, signedIn, sitemap,
+  ACCOUNT_TABS, builtSitemap, cannedDates, keepHome, namedPages, signedIn,
+  sitemap,
 } from "./support/canned.mjs";
 
 const WIDTHS = [1280, 390];
 
 // Not in the sitemap. /account/ is walked signed in, below.
 const UNLISTED = ["/login/", "/404.html"];
+
+// Every page the walk takes, when the site under test was built on
+// this machine (a local build, as in e2e-run.yml): read from its
+// sitemap as the tests are collected, so each page is a test of its
+// own (#607). Against staging there is no build on disk, and one test
+// reads the sitemap at run time and walks every page, as before.
+const BUILT = builtSitemap(process.env.E2E_BASE_URL);
+const PAGES = BUILT && [...new Set([...BUILT, ...UNLISTED])];
 
 // Helpers the walk calls in the page, installed on every load.
 const install = () => {
@@ -490,6 +499,23 @@ const escapes = async (page, key, { opener, isOpen, inside, modal }) => {
     .toBeFocused();
 };
 
+// One page of the walk: load it, let it settle, Tab through it.
+const tabsCleanly = async (page, path, browserName) => {
+  await page.goto(path);
+  await settle(page);
+  expect.soft(await walk(page, tabKey(browserName)), path).toEqual([]);
+};
+
+// The pages read from disk at collection are the pages the site
+// serves now, so the per-page tests walk what the one test walked
+// (#607). serve.mjs serves the folder it read them from; this catches
+// another server on the same port.
+if (BUILT) {
+  test("the walk's pages are the sitemap's (#607)", async ({ request }) => {
+    expect(BUILT).toEqual(await sitemap(request));
+  });
+}
+
 for (const width of WIDTHS) {
   test.describe(`keyboard at ${width}px (#197)`, () => {
     test.use({
@@ -503,18 +529,32 @@ for (const width of WIDTHS) {
       await stopPaySdks(page);
     });
 
-    test("every page tabs cleanly", async ({ page, request, browserName }) => {
-      const paths = [...await sitemap(request), ...UNLISTED];
-
-      // A Tab walk of some 30 pages takes WebKit over two minutes.
-      test.setTimeout(10 * 60_000);
-
-      for (const path of paths) {
-        await page.goto(path);
-        await settle(page);
-        expect.soft(await walk(page, tabKey(browserName)), path).toEqual([]);
+    if (PAGES) {
+      // One test per page (#607), so a failure names it and a run can
+      // take one: --grep " /about/ tabs cleanly" (with the leading
+      // space, " / tabs cleanly" is the home page alone) or
+      // E2E_PAGES="/about/".
+      for (const path of namedPages(PAGES)) {
+        test(`${path} tabs cleanly`, async ({ page, browserName }) => {
+          // The order page, empty, is the longest walk; with a full
+          // cart WebKit has run past two minutes (below).
+          test.setTimeout(5 * 60_000);
+          await tabsCleanly(page, path, browserName);
+        });
       }
-    });
+    } else {
+      test("every page tabs cleanly",
+        async ({ page, request, browserName }) => {
+          const paths = namedPages([...await sitemap(request), ...UNLISTED]);
+
+          // A Tab walk of some 30 pages takes WebKit over two minutes.
+          test.setTimeout(10 * 60_000);
+
+          for (const path of paths) {
+            await tabsCleanly(page, path, browserName);
+          }
+        });
+    }
 
     test("the order page with a cart tabs cleanly",
       async ({ page, browserName }) => {

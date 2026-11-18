@@ -122,13 +122,15 @@ test.describe("the rebuilt Membership tab (#602)", () => {
 
     const { own, hosted } = groups(page);
 
-    expect(await roundLines(own)).toEqual([
+    // Polled: the tab draws its rounds after /api/membership answers,
+    // and a one-time read before then finds none (run 44396830525).
+    await expect.poll(() => roundLines(own)).toEqual([
       ["Sunday, Nov 22 · 8:30 – 9:00 AM",
         "Open Closes at 11:59 PM on Sat, Nov 21"],
       ["Sunday, Dec 6 · 8:30 – 9:00 AM", "Next Opens on Sun, Nov 22"],
     ]);
     // A group with no next round has the open one alone.
-    expect(await roundLines(hosted)).toEqual([
+    await expect.poll(() => roundLines(hosted)).toEqual([
       ["Sunday, Nov 22 · 8:30 – 9:00 AM",
         "Open Closes at 11:59 PM on Sat, Nov 21"],
     ]);

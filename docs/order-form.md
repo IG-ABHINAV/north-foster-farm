@@ -1336,8 +1336,10 @@ Flags that take a value accept both `--reason "..."` and
   why as it is typed, and `onlyGroups` on the state entry in
   `data/delivery.json` is the switch.
 - **The delivery terms are linked, not ticked.** Above the delivery
-  fields a live countdown says "Order in the next N days, N hours, and
-  N minutes to get your order on our next delivery day". For every
+  fields a live countdown says "Order within N days, N hours, and N
+  minutes for delivery on Thursday, November 19.", naming the first
+  delivery day on offer by its select label (#627, 2026-11-18: this
+  quoted a wording retired long before). For every
   way to get an order, one line directly above the Pay button says
   that placing an order is agreeing to the policy at
   `/delivery-policy` (W8, #196). No drop-off contact name or phone: the

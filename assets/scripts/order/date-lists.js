@@ -6,7 +6,7 @@ import { mergeScheduled } from "./lib/group.mjs";
 import {
   earliestCutoff, fallbackChoice, pickupParts, scheduledChoices, stillOpen,
 } from "./lib/scheduled.mjs";
-import { dayName, weekday } from "./lib/zoned.mjs";
+import { setKept } from "../utils/keep-together.mjs";
 import { clear, whileLoading } from "../utils/skeleton.js";
 
 const RETRY = [2000, 5000, 15000, 30000];
@@ -323,7 +323,11 @@ export class DateLists {
   note(text, urgency = "") {
     if (!this.chip) return;
 
-    this.text.textContent = text;
+    // The last two words stay on one line ("November 19."), as wrap.mjs
+    // keeps the built pages' (#627). A node outside a document, as in
+    // the unit tests, takes the text as is.
+    if (this.text.ownerDocument) setKept(this.text, text);
+    else this.text.textContent = text;
     if (urgency) {
       this.chip.dataset.urgency = urgency;
     } else {
@@ -388,9 +392,12 @@ export class DateLists {
       urgency = "soon";
     }
 
+    // The day by its date, written as the select writes it (its first
+    // option's label, no year), so a later day picked from a draft
+    // can't seem to be the one counted down to (#627).
     this.note(`Order within ${countdown(days, hours % 24,
       Math.max(minutes % 60, days || hours ? 0 : 1))} for delivery on ${
-      dayName(weekday(next.date))}.`, urgency);
+      next.label}.`, urgency);
     this.timer = setTimeout(() => this.tick(), every);
   }
 }

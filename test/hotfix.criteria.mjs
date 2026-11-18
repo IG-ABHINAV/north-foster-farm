@@ -38,7 +38,10 @@
 //     api(path, { method = "GET", body })
 //                 GitHub's REST API, parsed JSON: here only GET and PUT
 //                 of repos/north-foster-farm/north-foster-farm/
-//                 rulesets/25361439.
+//                 rulesets/25361439, and GET of repos/north-foster-farm/
+//                 north-foster-farm/commits/<full sha>/check-runs, which
+//                 may carry ?per_page= and &page= and is paged as
+//                 GitHub pages it (30 to a page unless asked).
 //     confirm(question) -> Promise<boolean>
 //                 asks the person running the command.
 // - The force-push exception (coordinator, 2026-11-18, #612). Both
@@ -64,6 +67,33 @@
 // - `finish` rebuilds in the checkout. On a conflict it stops with the
 //   rebase in progress; once the files are fixed and `git add`ed,
 //   `finish` run again carries on from there.
+// - `finish` takes two runs, because ruleset 25361919 lets `staging`
+//   take only a commit on which lint-and-test, supply-chain and codeql
+//   have passed, and those checks run only on a push to `next`,
+//   `staging` or `main` (the #611 repair met this: `staging` was
+//   refused, "3 of 3 required status checks are expected"). Required
+//   checks are never relaxed (coordinator, 2026-11-18).
+//   Step 1, the first `finish`: the refusals, the rebuild and the
+//   content check, then, inside the window, it force-pushes `next` to
+//   the rebuilt `staging` and pushes the rebuilt `next` as the new
+//   branch `hotfix/rebuilt`. It keeps the placeholders, leaves
+//   `staging` at `main`, and prints that `staging` follows: run
+//   `finish` again once the checks on `next` are green.
+//   Step 2, `finish` run again while `hotfix/rebuilt` is on origin: it
+//   neither rebuilds nor applies criterion 4's refusals. It asks GitHub
+//   for the check runs of `next`'s head, the commit it will push to
+//   `staging`, and refuses, naming each of the three that has no
+//   completed run concluded "success", until all three have one (a
+//   name may also have skipped runs, which neither pass nor fail it).
+//   Then it moves `staging` to that commit and `next` to
+//   `hotfix/rebuilt`, both fast-forwards, deletes the placeholders
+//   and `hotfix/rebuilt`, and prints the lanes that must rebase.
+//   So the commit `staging` takes is one CI and CodeQL ran on as
+//   `next`'s head: the #580 rule ("proven on next") that `staging`
+//   takes only what a push to `next` proved. Had step 1 put `next` at
+//   the rebuilt `next` instead, the rebuilt `staging` beneath it would
+//   never be a head that CI runs on, and step 2 would wait forever
+//   whenever `staging` was behind `next` at `start`.
 // - The lanes that must rebase are origin's `lane/*` branches holding
 //   a commit of the old `next` that `main` did not hold at `start`.
 // - "Present by content" (criterion 6) is the implementer's to judge,
@@ -82,7 +112,10 @@
 // network or a real remote. GitHub's ruleset is the recorded GET
 // (test/fixtures/github/ruleset-25361439.json says where from); a PUT
 // is answered from it, since recording one would change the real
-// ruleset.
+// ruleset. Check runs come from two recorded GETs
+// (test/fixtures/github/check-runs-*.json): a commit is answered with
+// the green recording once origin has taken it as the head of `next`,
+// `staging` or `main` (CI ran there), and with the empty one before.
 //
 // Criterion 10 names the runbook and roles/coordinator.md. The tracked
 // runbook for promotion is "Promoting to staging and e2e" in
@@ -92,7 +125,10 @@
 // Decided by the coordinator on 2026-11-18, as the test lane
 // recommended (James may overrule): the force-push window and the
 // confirmation above; criterion 6 as written, with no flag to accept
-// a lost line; the freeze written in docs/cloud-lanes.md.
+// a lost line; the freeze written in docs/cloud-lanes.md; `finish` in
+// two steps with required checks never relaxed. Which commit step 1
+// puts on `next`, so that step 2's commit has its checks, is the test
+// lane's rule above, sent to the coordinator with this change.
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -109,10 +145,16 @@ import { USAGE, hotfixCommand } from "../bin/hotfix.mjs";
 
 const exec = promisify(execFile);
 
-const F = JSON.parse(readFileSync(new URL(
-  "fixtures/github/ruleset-25361439.json", import.meta.url), "utf8"));
+const fixture = (name) => JSON.parse(readFileSync(new URL(
+  `fixtures/github/${name}.json`, import.meta.url), "utf8"));
+const F = fixture("ruleset-25361439");
 const RULESET_PATH =
   /^\/?repos\/north-foster-farm\/north-foster-farm\/rulesets\/25361439$/;
+const CHECKS_PATH = new RegExp("^/?repos/north-foster-farm/"
+  + "north-foster-farm/commits/([0-9a-f]{40})/check-runs(?:\\?(.*))?$");
+const GREEN = fixture("check-runs-green").response;
+const NONE = fixture("check-runs-none").response;
+const REQUIRED = ["lint-and-test", "supply-chain", "codeql"];
 
 const ZERO = "0".repeat(40);
 const ROOT = mkdtempSync(join(tmpdir(), "hotfix-criteria-"));
@@ -222,13 +264,19 @@ const world = async ({ shape } = {}) => {
   const w = gitIn(work);
   const gitCalls = [];
   const events = [];
-  const gh = github(events);
+  // CI's verdict on a commit origin took as a head: "green", "partial"
+  // (codeql has not run) or "none" (nothing has run yet).
+  const ci = () => t.ci;
+  const heads = () => new Set(t.pushes()
+    .filter((p) => /^refs\/heads\/(next|staging|main)$/.test(p.ref))
+    .map((p) => p.now));
+  const gh = github(events, { ci, heads });
   const t = {
     dir, origin, work, c, gh, gitCalls, events,
     seed: s, w, o: gitIn(origin), l: gitIn(lander), lander,
-    // The answer to start's question, the questions asked, and which
-    // pushes fail.
-    answer: true, questions: [], failPush: () => false,
+    // The answer to start's question, the questions asked, which
+    // pushes fail, and what CI has made of the heads origin took.
+    answer: true, questions: [], failPush: () => false, ci: "green",
     deps: {
       // A push is logged with the ruleset as it stood when it was made.
       git: async (args) => {
@@ -267,13 +315,40 @@ const world = async ({ shape } = {}) => {
 // that would change the real ruleset. With `tamper` on, a PUT that
 // gives `next` back is stored without `staging`, as if GitHub had not
 // taken the restore whole, so the read-back differs from the saved
-// copy. Any other call was never recorded.
-const github = (events) => {
+// copy. The check runs of a commit are the green recording, with its
+// head_sha, once origin took the commit as a head (less the codeql runs
+// when CI is "partial"), and the empty recording otherwise; both paged
+// as GitHub pages them. Any other call was never recorded.
+const checkRuns = (sha, query, { ci, heads }) => {
+  const params = new URLSearchParams(query ?? "");
+  const size = Number(params.get("per_page") ?? 30);
+  const page = Number(params.get("page") ?? 1);
+  let all = [];
+
+  if (heads().has(sha) && ci() !== "none") {
+    all = GREEN.check_runs.map((run) => ({ ...run, head_sha: sha }))
+      .filter((run) => ci() !== "partial" || run.name !== "codeql");
+  }
+
+  return {
+    ...structuredClone(NONE), total_count: all.length,
+    check_runs: structuredClone(all.slice((page - 1) * size, page * size)),
+  };
+};
+
+const github = (events, commits) => {
   let current = structuredClone(F.ruleset);
   const calls = [];
   const gh = { tamper: false };
   const api = async (path, { method = "GET", body } = {}) => {
     calls.push({ path, method, body });
+    const checks = CHECKS_PATH.exec(path);
+
+    if (checks && method === "GET") {
+      events.push({ kind: "checks", sha: checks[1] });
+
+      return checkRuns(checks[1], checks[2], commits);
+    }
     if (!RULESET_PATH.test(path)) {
       throw new Error(`unrecorded ${method} ${path}`);
     }
@@ -395,6 +470,22 @@ const land = async (t, files, subject,
   return sha;
 };
 
+// Both steps of `finish`, the second once CI is green on `next`. The
+// second is not run if the first failed.
+const finishBoth = async (t, options) => {
+  const one = await run(t, "finish", options);
+  const two = one.error ? undefined : await run(t, "finish", options);
+  const all = two ? [one, two] : [one];
+
+  return {
+    one, two, error: one.error ?? two?.error,
+    text: all.map((r) => r.text).join("\n"),
+    pushes: all.flatMap((r) => r.pushes),
+    gitCalls: all.flatMap((r) => r.gitCalls),
+    events: all.flatMap((r) => r.events),
+  };
+};
+
 const PLAIN = [{ "a.txt": withLine(7, "eight fixed") }, "Fix eight"];
 const CONFLICT = [{ "a.txt": withLine(1, "two from main") }, "Fix two"];
 
@@ -408,23 +499,30 @@ const RESOLVED = lines(
 const reportsDropped = (text, subject) => text.split("\n").some((line) =>
   line.includes(subject) && /drop|already/i.test(line));
 
-const FORCE = /^(-f|--force|--force-with-lease(=.*)?|--force-if-includes)$/;
+// Force for every ref a push names, and force for one ref only
+// (`--force-with-lease=<ref>` or `=<ref>:<expected>`).
+const FORCE = /^(-f|--force|--force-with-lease|--force-if-includes)$/;
+const LEASE = /^--force-with-lease=([^:]+)/;
+const branchOf = (ref) => ref.replace(/^\+/, "")
+  .replace(/^refs\/heads\//, "");
 
 // The destinations of one `git push` the seam saw, each with whether it
 // was pushed with force and whether it was a deletion.
 const pushTargets = (args) => {
   const words = args.slice(1);
   const forced = words.some((w) => FORCE.test(w));
+  const leased = words.map((w) => LEASE.exec(w)?.[1]).filter(Boolean)
+    .map(branchOf);
   const deleting = words.includes("-d") || words.includes("--delete");
   const plain = words.filter((w) => !w.startsWith("-")).slice(1);
 
   return plain.map((spec) => {
-    const dst = (spec.includes(":") ? spec.split(":").at(-1) : spec)
-      .replace(/^\+/, "").replace(/^refs\/heads\//, "");
+    const dst = branchOf(spec.includes(":")
+      ? spec.split(":").at(-1) : spec);
 
     return {
       spec, dst,
-      force: forced || spec.startsWith("+"),
+      force: forced || leased.includes(dst) || spec.startsWith("+"),
       delete: deleting || spec.startsWith(":"),
     };
   });
@@ -457,6 +555,29 @@ const windowHeld = (r, label) => {
     `${label} restores the saved copy`);
   assert.ok(r.events.slice(at(writes.at(-1)) + 1)
     .some((e) => e.kind === "read"), `${label} reads it back after`);
+};
+
+// A run that needs no window: any push it forces to `next` or `staging`
+// is made inside one all the same, and a run that writes the ruleset
+// at all restores the saved copy and reads it back.
+const noBareForce = (r, label) => {
+  const writes = r.events.filter((e) => e.kind === "write");
+
+  for (const p of r.events.filter((e) => e.kind === "push")) {
+    for (const x of pushTargets(p.args)) {
+      if (x.force && !x.delete && ["next", "staging"].includes(x.dst)) {
+        assert.deepEqual(p.ruleset.conditions.ref_name.include,
+          ["refs/heads/main"], `${label} forces ${x.dst} only inside the `
+          + "window");
+      }
+    }
+  }
+  if (writes.length) {
+    assert.deepEqual(guards(writes.at(-1).ruleset), guards(F.ruleset),
+      `${label} restores the saved copy`);
+    assert.ok(r.events.slice(r.events.indexOf(writes.at(-1)) + 1)
+      .some((e) => e.kind === "read"), `${label} reads it back after`);
+  }
 };
 
 // No write ever left `main` open: it stays covered, both rules stay,
@@ -588,13 +709,14 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
       "start never pushes main");
 
     const fix = await land(t, ...PLAIN);
-    const finished = await run(t, "finish");
+    const finished = await finishBoth(t);
 
     ok(finished);
+    assert.ok(finished.two, "both steps of finish ran");
     assert.equal(await head(t.o, "main"), fix,
       "main is where the ordinary means put it");
     assert.ok(!finished.pushes.some((p) => p.ref === "refs/heads/main"),
-      "finish never pushes main");
+      "neither step of finish pushes main");
   });
 
   it("4. finish refuses unless main has moved past where start found it "
@@ -632,6 +754,17 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
     refused(r);
     assert.match(r.error.message, /\bstaging\b/, "names staging");
     assert.deepEqual(await refs(d.o), before, "changes nothing");
+
+    // At step 2, `next` has rightly moved past `main` and `staging`:
+    // none of these refusals stops it.
+    const g = await world();
+
+    ok(await run(g, "start"));
+    await land(g, ...PLAIN);
+    ok(await run(g, "finish"));
+    assert.notEqual(await head(g.o, "next"), await head(g.o, "main"),
+      "step 1 moved next past main");
+    ok(await run(g, "finish"));
   });
 
   it("5. finish rebases the placeholders onto main, stops on a conflict "
@@ -654,7 +787,7 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
     writeFileSync(join(t.work, "a.txt"), RESOLVED);
     await t.w(["add", "a.txt"]);
 
-    ok(await run(t, "finish"));
+    ok(await finishBoth(t));
 
     assert.equal(await head(t.o, "main"), fix);
     const next = await head(t.o, "next");
@@ -686,7 +819,7 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
     ok(await run(a, "start"));
 
     const fix = await land(a, {}, "Hotfix the b line", { pick: a.c.N1 });
-    const done = await run(a, "finish");
+    const done = await finishBoth(a);
 
     ok(done);
     assert.ok(reportsDropped(done.text, "Change b"),
@@ -723,42 +856,85 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
   });
 
   it("7. finish force-pushes next and staging only, then deletes the "
-    + "placeholders, and prints the lanes that must rebase", async () => {
+    + "placeholders, and prints the lanes that must rebase (in two steps: "
+    + "next first, staging once its checks are green)", async () => {
     const t = await world();
 
     ok(await run(t, "start"));
-    await land(t, ...PLAIN);
+    const fix = await land(t, ...PLAIN);
     const before = await refs(t.o);
-    const r = await run(t, "finish");
 
-    ok(r);
+    // Step 1: `next` moves to the rebuilt staging, the rebuilt next
+    // waits as `hotfix/rebuilt`, and nothing else moves.
+    const one = await run(t, "finish");
+
+    ok(one);
+
+    const mid = await refs(t.o);
+    const next1 = mid["refs/heads/next"];
+    const rebuilt = mid["refs/heads/hotfix/rebuilt"];
+
+    assert.deepEqual(changedRefs(before, mid),
+      ["refs/heads/hotfix/rebuilt", "refs/heads/next"],
+      "step 1 moves next and adds hotfix/rebuilt, and nothing else");
+    assert.equal(mid["refs/heads/staging"], fix, "staging stays at main");
+    assert.equal(mid["refs/heads/hotfix/next"], t.c.N2,
+      "the placeholder for next stays");
+    assert.equal(mid["refs/heads/hotfix/staging"], t.c.S1,
+      "the placeholder for staging stays");
+    assert.ok(await isAncestor(t.o, fix, next1), "next is on main");
+    assert.ok(await has(t.o, next1, "c.txt"),
+      "next holds what staging held");
+    assert.ok(!await has(t.o, next1, "d.txt"),
+      "and nothing that was only on next");
+    assert.ok(await isAncestor(t.o, next1, rebuilt),
+      "hotfix/rebuilt is on next");
+    assert.ok(await has(t.o, rebuilt, "d.txt"),
+      "and holds what next held");
+    assert.equal(one.pushes.filter((p) => p.now === ZERO).length, 0,
+      "step 1 deletes nothing");
+    assert.match(one.text, /\bstaging\b/, "says staging follows");
+    assert.match(one.text, /hotfix finish/, "says to run finish again");
+    assert.match(one.text, /check/i, "once the checks are green");
+
+    // Step 2: `staging` takes the commit next held, `next` takes the
+    // rebuilt next, and the hotfix branches go.
+    const two = await run(t, "finish");
+
+    ok(two);
 
     const now = await refs(t.o);
 
-    assert.deepEqual(changedRefs(before, now), [
-      "refs/heads/hotfix/next", "refs/heads/hotfix/staging",
-      "refs/heads/next", "refs/heads/staging",
-    ], "no other ref on origin moved, appeared or went");
-    assert.equal(now["refs/heads/hotfix/next"], undefined,
-      "the placeholder for next is gone");
-    assert.equal(now["refs/heads/hotfix/staging"], undefined,
-      "the placeholder for staging is gone");
+    assert.deepEqual(changedRefs(mid, now), [
+      "refs/heads/hotfix/next", "refs/heads/hotfix/rebuilt",
+      "refs/heads/hotfix/staging", "refs/heads/next", "refs/heads/staging",
+    ], "step 2 moves next and staging and deletes the hotfix branches, "
+      + "and nothing else");
+    assert.deepEqual(changedRefs(before, now),
+      ["refs/heads/hotfix/next", "refs/heads/hotfix/staging",
+        "refs/heads/next", "refs/heads/staging"],
+      "across both steps, no other ref on origin moved, appeared or went");
+    assert.equal(now["refs/heads/staging"], next1,
+      "staging is the commit next held after step 1");
+    assert.equal(now["refs/heads/next"], rebuilt,
+      "next is the rebuilt next");
 
-    const at = (ref) => r.pushes.findLastIndex((p) => p.ref === ref);
+    const at = (ref) => two.pushes.findLastIndex((p) => p.ref === ref);
     const pushed = Math.max(at("refs/heads/next"),
       at("refs/heads/staging"));
-    const deleted = r.pushes.map((p, i) => [p, i])
+    const deleted = two.pushes.map((p, i) => [p, i])
       .filter(([p]) => p.now === ZERO).map(([, i]) => i);
 
     assert.ok(at("refs/heads/next") >= 0 && at("refs/heads/staging") >= 0,
       "next and staging were pushed");
-    assert.equal(deleted.length, 2, "both placeholders were deleted");
+    assert.equal(deleted.length, 3,
+      "both placeholders and hotfix/rebuilt were deleted");
     assert.ok(deleted.every((i) => i > pushed),
-      "the placeholders go only after next and staging are pushed");
+      "they go only after next and staging are pushed");
 
-    assert.match(r.text, /lane\/alpha/,
+    assert.match(two.text, /lane\/alpha/,
       "names the lane cut from the old next");
-    assert.doesNotMatch(r.text, /lane\/beta/,
+    assert.doesNotMatch(two.text, /lane\/beta/,
       "and not the lane cut from main, which needs no rebase");
   });
 
@@ -812,6 +988,16 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
     assert.match(r.text, /\bnext\b/);
     assert.match(r.text, /\bstaging\b/);
     await unchanged(b, before, r);
+
+    // Step 2, after a real step 1.
+    ok(await run(b, "finish"));
+    await b.w(["fetch", "-q", "--prune", "origin"]);
+    before = await snapshot(b);
+    b.gh.calls.length = 0;
+    r = await run(b, "finish", { dryRun: true });
+    ok(r);
+    assert.match(r.text, /\bstaging\b/, "the plan for step 2 names staging");
+    await unchanged(b, before, r);
   });
 
   it("9. neither command can move main, and neither pushes with force to "
@@ -821,9 +1007,10 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
 
     ok(started);
     await land(t, {}, "Hotfix the b line", { pick: t.c.N1 });
-    const finished = await run(t, "finish");
+    const finished = await finishBoth(t);
 
     ok(finished);
+    assert.ok(finished.two, "both steps of finish ran");
 
     // What origin took from the commands.
     for (const p of [...started.pushes, ...finished.pushes]) {
@@ -890,9 +1077,9 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
   });
 
   it("the force-push exception: start and finish narrow ruleset 25361439 "
-    + "to main alone around their pushes to next and staging, restore it "
-    + "even when a push fails, and read it back against the saved copy",
-  async () => {
+    + "to main alone around their forced pushes to next and staging, "
+    + "restore it even when a push fails, and read it back against the "
+    + "saved copy", async () => {
     const t = await world();
 
     ok(await run(t, "start", { dryRun: true }));
@@ -913,11 +1100,29 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
     const finished = await run(t, "finish");
 
     ok(finished);
-    windowHeld(finished, "finish");
+    windowHeld(finished, "finish (step 1)");
+
+    // Step 2 moves `staging` and `next` forward only: neither push is
+    // forced past anything, so it needs no window.
+    const mid = await refs(t.o);
+    const second = await run(t, "finish");
+
+    ok(second);
+    noBareForce(second, "finish (step 2)");
+    for (const name of ["next", "staging"]) {
+      const p = second.pushes.find((x) => x.ref === `refs/heads/${name}`);
+
+      assert.ok(p, `step 2 pushes ${name}`);
+      assert.equal(p.old, mid[`refs/heads/${name}`]);
+      assert.ok(await isAncestor(t.o, p.old, p.now),
+        `step 2 moves ${name} by a fast-forward`);
+    }
     neverOpens(t.events);
 
-    // A push that fails part-way still gets the ruleset restored.
-    for (const action of ["start", "finish"]) {
+    // A push that fails part-way still gets the ruleset restored: start's
+    // last push moves staging, finish's step 1 moves next.
+    for (const [action, target] of [["start", "staging"],
+      ["finish", "next"]]) {
       const f = await world();
 
       if (action === "finish") {
@@ -925,14 +1130,14 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
         await land(f, ...PLAIN);
       }
       f.failPush = (args) => pushTargets(args)
-        .some((x) => x.dst === "staging" && !x.delete);
+        .some((x) => x.dst === target && !x.delete);
 
       const r = await run(f, action);
       const writes = r.events.filter((e) => e.kind === "write");
       const failed = r.events.indexOf(branchPushes(r.events).at(-1));
 
       assert.ok(r.error, `${action} fails with its push`);
-      assert.ok(failed >= 0, `${action} tried to push staging`);
+      assert.ok(failed >= 0, `${action} tried to push ${target}`);
       assert.ok(writes.length >= 2
         && r.events.indexOf(writes.at(-1)) > failed,
       `${action} restores the ruleset after the failed push`);
@@ -977,7 +1182,7 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
     ok(await run(t, "start"));
 
     const fix = await land(t, ...PLAIN);
-    const r = await run(t, "finish");
+    const r = await finishBoth(t);
 
     for (const branch of ["next", "staging"]) {
       assert.equal(await t.o(["rev-list", "--merges",
@@ -990,6 +1195,50 @@ describe("bin/nff hotfix (#612 acceptance criteria)", () => {
       assert.match(r.error.message, /^Refused:/,
         "a merge commit is refused, not let through");
     }
+  });
+
+  it("finish's second step moves staging only to the commit next held, "
+    + "once lint-and-test, supply-chain and codeql have passed on it, and "
+    + "refuses naming each that has not", async () => {
+    const t = await world();
+
+    ok(await run(t, "start"));
+    await land(t, ...PLAIN);
+    ok(await run(t, "finish"));
+
+    const mid = await refs(t.o);
+    const proven = mid["refs/heads/next"];
+    const asked = (r) => r.events.filter((e) => e.kind === "checks")
+      .map((e) => e.sha);
+
+    // Nothing has run on `next` yet.
+    t.ci = "none";
+    let r = await run(t, "finish");
+
+    refused(r);
+    for (const name of REQUIRED) {
+      assert.ok(r.error.message.includes(name), `names ${name}`);
+    }
+    assert.ok(asked(r).includes(proven),
+      "asks GitHub about the commit next holds");
+    assert.deepEqual(await refs(t.o), mid, "changes nothing");
+    assert.deepEqual(r.pushes, [], "pushes nothing");
+
+    // CI has passed but CodeQL has not run.
+    t.ci = "partial";
+    r = await run(t, "finish");
+    refused(r);
+    assert.ok(r.error.message.includes("codeql"), "names codeql");
+    assert.deepEqual(await refs(t.o), mid, "changes nothing");
+
+    // All three have passed, among the recording's skipped runs.
+    t.ci = "green";
+    r = await run(t, "finish");
+    ok(r);
+    assert.equal(await head(t.o, "staging"), proven,
+      "staging is the commit next held");
+    assert.equal(asked(r).at(-1), proven,
+      "the last commit it asked about is the one staging took");
   });
 
   it("start asks before the staging site shows production's content, "

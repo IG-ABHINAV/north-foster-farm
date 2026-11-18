@@ -174,7 +174,8 @@ test.describe("payments", () => {
     expect(receipt.text).toContain(entry.name);
 
     const farm = await waitForMail({
-      subject: new RegExp(`^New order ${body.orderId} `), since,
+      // "New order <id>:", then the total and the place (71ae6e62).
+      subject: new RegExp(`^New order ${body.orderId}: `), since,
     });
 
     expect(farm.subject).toContain(entry.name);

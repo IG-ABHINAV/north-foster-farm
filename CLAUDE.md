@@ -59,6 +59,10 @@ decisions James made on GitHub. The issue numbers point to the source.
   - "email address" when it means the address;
   - drop sites are plural and unnamed unless the line is about one site;
   - every rate-limit message names what was tried;
+  - a busy button says "Submitting" on a form and "Sending" on an
+    email link (a sign-in, join, new email address or Farm news
+    link); the contact form, which sends a message, is the exception
+    and says "Sending" (James, 2026-11-18, #558);
   - an approved wording applies everywhere the same text appears;
   - step-by-step instructions only for what the reader may not know
     how to do, never for the obvious ("choose, say how you want it,

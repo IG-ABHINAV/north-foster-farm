@@ -26,8 +26,13 @@ on:
 
 permissions: {}
 
+# Keyed as in ci.yml, for the same reason (#620): a pull request by its
+# number, a push by ref and SHA, so no pull request can cancel a push.
 concurrency:
-  group: codeql-${{ github.ref }}
+  group: >-
+    codeql-${{ github.event_name == 'pull_request'
+    && format('pr-{0}', github.event.pull_request.number)
+    || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

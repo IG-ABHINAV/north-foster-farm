@@ -19,8 +19,17 @@ on:
 permissions:
   contents: read
 
+# A pull request's group is its number, so a newer push to it cancels
+# the older run. Every other run has a group of its own (ref and SHA)
+# and is never cancelled. Keying a pull request by github.ref let it
+# cancel next's push run (#620): when its synchronize event arrives
+# after the landing has marked it merged, github.ref is the base,
+# refs/heads/next, not refs/pull/N/merge.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: >-
+    ci-${{ github.workflow }}-${{ github.event_name == 'pull_request'
+    && format('pr-{0}', github.event.pull_request.number)
+    || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

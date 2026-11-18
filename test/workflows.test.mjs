@@ -90,6 +90,26 @@ describe("workflows: nothing prints a response or a secret", () => {
     }
   });
 
+  // #620: a pull request's late synchronize event, after the landing
+  // marked it merged, has github.ref refs/heads/next and cancelled
+  // next's push run. A pull request keys on its number, a push on ref
+  // and SHA, and only a pull request cancels.
+  for (const file of ["ci.yml", "codeql.yml"]) {
+    it(`${file}: no pull request shares a push's concurrency group`, () => {
+      const text = readFileSync(join(dir, file), "utf8");
+      const block = text.match(/^concurrency:\n((?: {2}.*\n)+)/m)[1]
+        .replace(/\s+/g, " ");
+      const group = block.match(/group: >- (.*?) cancel-in-progress:/)[1];
+
+      assert.ok(group.endsWith(
+        "${{ github.event_name == 'pull_request' && " +
+        "format('pr-{0}', github.event.pull_request.number) || " +
+        "format('{0}-{1}', github.ref, github.sha) }}"), group);
+      assert.match(block,
+        /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}/);
+    });
+  }
+
   for (const file of files) {
     it(`${file}: every curl writes its response to a file`, () => {
       const text = readFileSync(join(dir, file), "utf8");

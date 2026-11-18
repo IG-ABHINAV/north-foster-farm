@@ -1,3 +1,5 @@
+@use "sass:map";
+
 // Sign-in and account pages. The sign-in page keeps its card; the
 // account page sets its content straight on the page (#303).
 
@@ -874,11 +876,18 @@
     color: var(--bs-secondary-color);
   }
 
-  // Every section of a group has the page's gap above its heading
-  // (#579, and the member's sections with them, #602), whether it
-  // follows the group's name, another section or the host's part.
+  // Every section of a group has one gap above its heading (#579, and
+  // the member's sections with them, #602), whether it follows the
+  // group's name, another section or the host's part. A heading sits
+  // closer to what it introduces than to what came before (James,
+  // #608): one step up the spacing scale from the page's gap above
+  // it, 2.25rem for 1.5rem, and one step down below it, 1rem.
   .account-membership-group .account-group {
-    margin-top: var(--account-gap);
+    margin-top: map.get($spacers, 5);
+  }
+
+  .account-membership-group .account-group-head {
+    margin-bottom: map.get($spacers, 3);
   }
 
   // A round (#602): the pickup, then under it, smaller and gray, the

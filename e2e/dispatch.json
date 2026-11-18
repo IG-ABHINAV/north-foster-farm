@@ -383,6 +383,7 @@
         "e2e/map.spec.mjs",
         "e2e/missed-delivery.spec.mjs",
         "e2e/news-hide.spec.mjs",
+        "e2e/onfarm-times.spec.mjs",
         "e2e/order-draft-date.spec.mjs",
         "e2e/order-layout.spec.mjs",
         "e2e/order-page.spec.mjs",
@@ -391,6 +392,7 @@
         "e2e/pay-focus.spec.mjs",
         "e2e/payment-stacking.spec.mjs",
         "e2e/payment.spec.mjs",
+        "e2e/picker-out.spec.mjs",
         "e2e/pickup-horizon.spec.mjs",
         "e2e/pricing.spec.mjs",
         "e2e/rate-limit.spec.mjs",
@@ -454,6 +456,7 @@
         "e2e/map.spec.mjs",
         "e2e/missed-delivery.spec.mjs",
         "e2e/news-hide.spec.mjs",
+        "e2e/onfarm-times.spec.mjs",
         "e2e/order-draft-date.spec.mjs",
         "e2e/order-layout.spec.mjs",
         "e2e/order-page.spec.mjs",
@@ -462,6 +465,7 @@
         "e2e/pay-focus.spec.mjs",
         "e2e/payment-stacking.spec.mjs",
         "e2e/payment.spec.mjs",
+        "e2e/picker-out.spec.mjs",
         "e2e/pickup-horizon.spec.mjs",
         "e2e/pricing.spec.mjs",
         "e2e/rate-limit.spec.mjs",
@@ -531,6 +535,7 @@
         "e2e/membership.spec.mjs",
         "e2e/missed-delivery.spec.mjs",
         "e2e/news-hide.spec.mjs",
+        "e2e/onfarm-times.spec.mjs",
         "e2e/order-draft-date.spec.mjs",
         "e2e/order-layout.spec.mjs",
         "e2e/order-page.spec.mjs",
@@ -539,6 +544,7 @@
         "e2e/pay-focus.spec.mjs",
         "e2e/payment-stacking.spec.mjs",
         "e2e/payment.spec.mjs",
+        "e2e/picker-out.spec.mjs",
         "e2e/pickup-horizon.spec.mjs",
         "e2e/pricing.spec.mjs",
         "e2e/rate-limit.spec.mjs",
@@ -604,6 +610,7 @@
         "e2e/membership.spec.mjs",
         "e2e/missed-delivery.spec.mjs",
         "e2e/news-hide.spec.mjs",
+        "e2e/onfarm-times.spec.mjs",
         "e2e/order-draft-date.spec.mjs",
         "e2e/order-layout.spec.mjs",
         "e2e/order-page.spec.mjs",
@@ -612,6 +619,7 @@
         "e2e/pay-focus.spec.mjs",
         "e2e/payment-stacking.spec.mjs",
         "e2e/payment.spec.mjs",
+        "e2e/picker-out.spec.mjs",
         "e2e/pickup-horizon.spec.mjs",
         "e2e/pricing.spec.mjs",
         "e2e/rate-limit.spec.mjs",
@@ -690,7 +698,9 @@
         "e2e/membership-layout.spec.mjs",
         "e2e/membership.spec.mjs",
         "e2e/missed-delivery.spec.mjs",
+        "e2e/onfarm-times.spec.mjs",
         "e2e/overflow.spec.mjs",
+        "e2e/picker-out.spec.mjs",
         "e2e/scheduled-pickup.spec.mjs",
         "e2e/sign-in-order.spec.mjs",
         "e2e/skeletons.spec.mjs",
@@ -1480,6 +1490,22 @@
       ],
       "specs": [
         "e2e/order-page.spec.mjs"
+      ]
+    },
+    {
+      "paths": [
+        "e2e/onfarm-times.spec.mjs"
+      ],
+      "specs": [
+        "e2e/onfarm-times.spec.mjs"
+      ]
+    },
+    {
+      "paths": [
+        "e2e/picker-out.spec.mjs"
+      ],
+      "specs": [
+        "e2e/picker-out.spec.mjs"
       ]
     },
     {

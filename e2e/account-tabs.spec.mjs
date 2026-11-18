@@ -123,9 +123,22 @@ test.describe("the account's tab row", () => {
         "the cut-off tab shows whole, clear of the arrows")
         .toEqual({ start: true, end: true });
 
-      // Tap by tap, it reaches the start, and its arrow goes.
+      // Tap by tap, it reaches the start, and its arrow goes. Each look
+      // at the arrow comes two frames after the row moved, so its
+      // scroll event has synced it, or the arrow reads as shown just
+      // before it hides and the next tap waits on a hidden button.
+      const frames = () => page.evaluate(() => new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }));
+
+      await frames();
       for (let i = 0; i < 6 && await back.isVisible(); i += 1) {
+        const from = (await row(nav)).left;
+
         await back.click();
+        await expect.poll(async () => (await row(nav)).left)
+          .toBeLessThan(from);
+        await frames();
       }
       await expect(back).toBeHidden();
       expect((await row(nav)).left).toBeLessThanOrEqual(1);

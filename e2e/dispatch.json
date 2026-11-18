@@ -412,6 +412,7 @@
         "e2e/typed-address.spec.mjs",
         "e2e/venmo-paid.spec.mjs",
         "e2e/wallets.spec.mjs",
+        "e2e/window-label.spec.mjs",
         "e2e/wording.spec.mjs"
       ],
       "pages": [
@@ -485,6 +486,7 @@
         "e2e/typed-address.spec.mjs",
         "e2e/venmo-paid.spec.mjs",
         "e2e/wallets.spec.mjs",
+        "e2e/window-label.spec.mjs",
         "e2e/wording.spec.mjs"
       ],
       "pages": [
@@ -559,6 +561,7 @@
         "e2e/typed-address.spec.mjs",
         "e2e/venmo-paid.spec.mjs",
         "e2e/wallets.spec.mjs",
+        "e2e/window-label.spec.mjs",
         "e2e/wording.spec.mjs"
       ],
       "pages": [
@@ -625,6 +628,7 @@
         "e2e/sign-in-order.spec.mjs",
         "e2e/skeletons.spec.mjs",
         "e2e/sku-alias.spec.mjs",
+        "e2e/window-label.spec.mjs",
         "e2e/wording.spec.mjs"
       ],
       "pages": [
@@ -1418,6 +1422,14 @@
       ],
       "specs": [
         "e2e/onfarm-times.spec.mjs"
+      ]
+    },
+    {
+      "paths": [
+        "e2e/window-label.spec.mjs"
+      ],
+      "specs": [
+        "e2e/window-label.spec.mjs"
       ]
     },
     {

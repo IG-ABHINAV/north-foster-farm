@@ -29,9 +29,20 @@ const files = (dir, pattern) => readdirSync(join(ROOT, dir), {
   .map((e) => relative(ROOT, join(e.parentPath, e.name)))
   .sort();
 
-// A template without its Go comments, which may quote markup.
-const markup = (text) => text
-  .replace(/\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g, "");
+// A template without its Go comments, which may quote markup. The
+// replace runs until nothing changes: one pass can join the pieces
+// around a comment into a new one.
+const markup = (text) => {
+  let before;
+  let after = text;
+
+  do {
+    before = after;
+    after = before.replace(/\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g, "");
+  } while (after !== before);
+
+  return after;
+};
 
 // The busy-button calls in some markup, each as { label, busy }.
 const busyCalls = (text) => [...markup(text)

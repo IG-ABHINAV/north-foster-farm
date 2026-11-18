@@ -51,15 +51,29 @@ const wrong = (file, text, base = ROOT, prefix = "") => [
   .filter((m) => m !== NAME)
   .map((m) => `${prefix}${relative(base, file)}: ${m}`);
 
+// The text with every match of the patterns removed, again and again
+// until none is left: one pass can join the pieces around a match
+// into a new one.
+const stripAll = (text, ...patterns) => {
+  let before;
+  let after = text;
+
+  do {
+    before = after;
+    after = patterns.reduce((t, p) => t.replace(p, ""), before);
+  } while (after !== before);
+
+  return after;
+};
+
 // Comments are for the next developer, not the customer.
 const uncommented = (file, text) => {
   if (/\.html$/.test(file)) {
-    return text.replace(/\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g, "")
-      .replace(/<!--[\s\S]*?-->/g, "");
+    return stripAll(text, /\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g,
+      /<!--[\s\S]*?-->/g);
   }
   if (/\.m?js$/.test(file)) {
-    return text.replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
+    return stripAll(text, /\/\*[\s\S]*?\*\//g, /^\s*\/\/.*$/gm);
   }
 
   return text;

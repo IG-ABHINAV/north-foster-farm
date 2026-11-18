@@ -1,0 +1,46 @@
+﻿2026-11-18T05:08:24.7508713Z Current runner version: '2.338.2'
+2026-11-18T05:08:24.7546504Z ##[group]Runner Image Provisioner
+2026-11-18T05:08:24.7547837Z Hosted Compute Agent
+2026-11-18T05:08:24.7548937Z Version: 20261103.629
+2026-11-18T05:08:24.7550415Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-18T05:08:24.7551795Z Build Date: 2026-11-03T17:26:59Z
+2026-11-18T05:08:24.7553055Z Worker ID: {a03a6f57-de54-4ed4-9c43-0d8f2925e403}
+2026-11-18T05:08:24.7554318Z Region: eastus
+2026-11-18T05:08:24.7555370Z Cloud: Azure
+2026-11-18T05:08:24.7556325Z ##[endgroup]
+2026-11-18T05:08:24.7558826Z ##[group]Operating System
+2026-11-18T05:08:24.7560301Z Ubuntu
+2026-11-18T05:08:24.7561301Z 26.04.1
+2026-11-18T05:08:24.7562231Z LTS
+2026-11-18T05:08:24.7563253Z ##[endgroup]
+2026-11-18T05:08:24.7564297Z ##[group]Runner Image
+2026-11-18T05:08:24.7565333Z Image: ubuntu-26.04
+2026-11-18T05:08:24.7566452Z Version: 20261111.196.1
+2026-11-18T05:08:24.7569429Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-18T05:08:24.7572351Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-18T05:08:24.7574102Z ##[endgroup]
+2026-11-18T05:08:24.7576009Z ##[group]GITHUB_TOKEN Permissions
+2026-11-18T05:08:24.7579285Z Contents: read
+2026-11-18T05:08:24.7580410Z Metadata: read
+2026-11-18T05:08:24.7581489Z ##[endgroup]
+2026-11-18T05:08:24.7584706Z Secret source: Actions
+2026-11-18T05:08:24.7586443Z Cache mode: write
+2026-11-18T05:08:24.7588017Z Prepare workflow directory
+2026-11-18T05:08:24.8086260Z Prepare all required actions
+2026-11-18T05:08:24.8243860Z Complete job name: e2e-named
+2026-11-18T05:08:24.9438129Z ##[group]Run test "$PLAN" = success
+2026-11-18T05:08:24.9439000Z [36;1mtest "$PLAN" = success[0m
+2026-11-18T05:08:24.9440531Z [36;1mif [ -z "$NAMED" ]; then[0m
+2026-11-18T05:08:24.9441422Z [36;1m  test "$FULL" = success[0m
+2026-11-18T05:08:24.9442160Z [36;1melse[0m
+2026-11-18T05:08:24.9442766Z [36;1m  test "$NARROW" = success[0m
+2026-11-18T05:08:24.9443479Z [36;1mfi[0m
+2026-11-18T05:08:25.0121036Z shell: /usr/bin/bash -e {0}
+2026-11-18T05:08:25.0122204Z env:
+2026-11-18T05:08:25.0122939Z   PLAN: success
+2026-11-18T05:08:25.0124608Z   NAMED: e2e/membership.spec.mjs e2e/keep-together.spec.mjs e2e/account.spec.mjs e2e/account-tabs.spec.mjs e2e/keyboard.spec.mjs e2e/overflow.spec.mjs
+2026-11-18T05:08:25.0126418Z   FULL: skipped
+2026-11-18T05:08:25.0127139Z   NARROW: failure
+2026-11-18T05:08:25.0127810Z ##[endgroup]
+2026-11-18T05:08:25.0338250Z ##[error]Process completed with exit code 1.
+2026-11-18T05:08:25.0589890Z Cleaning up orphan processes

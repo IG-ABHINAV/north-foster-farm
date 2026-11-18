@@ -116,6 +116,16 @@ same value has the same placeholder in every file, so the payment in
 | `resend-send-refused` | the same send from a sender the key may not use |
 | `resend-send-invalid` | a send Resend rejects with 422 |
 
+## GitHub
+
+Recorded with `gh api` and scrubbed of author names, emails and the
+actor's login. Each JSON file's `_source` names its requests and date.
+
+| Fixture | What it stands in for |
+| --- | --- |
+| `github/e2e-staging-runs.json` | the full staging runs `bin/promote.mjs` reads |
+| `github/e2e-dispatch.json`, `-failed.txt`, `-gate.txt` | a dispatch of `e2e.yml`, a queued, a passed and a failed run, their jobs and the failed jobs' logs, for `bin/nff e2e` (#610) |
+
 ## Still to record by hand
 
 These need a person; none is scripted.

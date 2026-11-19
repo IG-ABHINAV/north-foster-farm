@@ -3,7 +3,9 @@
 
 import { readFileSync } from "node:fs";
 
-import { OrderPage, SKU, expect, test } from "./support/order.mjs";
+import {
+  OrderPage, SKU, expect, settleCart, test,
+} from "./support/order.mjs";
 import { PLENTY } from "./support/stock.mjs";
 
 const catalog = JSON.parse(readFileSync(
@@ -131,13 +133,43 @@ test.describe("order page", () => {
     async ({ page }) => {
       const order = new OrderPage(page);
 
-      await order.open({ wings: 5, eggs: 1 });
+      // The ZIP field is in Delivery's fields, which are inert until
+      // Delivery is chosen: filled under on-farm pickup, it never took
+      // focus, and the click blurred nothing.
+      await order.open({ wings: 5, eggs: 1 }, { method: "delivery" });
+      // Choosing a way scrolls its first field into view, smoothly,
+      // 240 ms later (order-form.js revealMethod); a fill and a settle
+      // made before that scroll ends would be undone by it. The timer
+      // leaves no mark to wait on, so: past it, then its field wholly
+      // in view and the page still. The wait is a page timer, queued
+      // after the reveal's (the radio was checked before open
+      // returned) with a later deadline, so it cannot run first even
+      // when a loaded runner's main thread is late; a wait timed in
+      // Node could.
+      await page.evaluate(() => new Promise((done) => {
+        setTimeout(done, 300);
+      }));
+      await expect(page.locator("[data-method-body='delivery']")
+        .locator("select, input").first()).toBeInViewport({ ratio: 1 });
+      await order.scrollSettled();
       // Leaving a changed field re-renders the cart lines; the click
       // that caused the blur must still land on its remove control.
       await order.zip.fill("02857");
-      await order.cart.getByRole("button", {
+      // On a phone the fill leaves the cart easing into its slot, and
+      // the click's own scroll could set the line at the screen's
+      // foot, where the cart lifts off folded and hides it (full run
+      // 44417511060). Settle it first: a scroll moves no focus, so the
+      // field is still the one the click blurs.
+      await settleCart(order);
+      await expect(order.zip).toBeFocused();
+
+      const remove = order.cart.getByRole("button", {
         name: "Remove Wings, 1.0 – 1.9 lbs from your cart",
-      }).click();
+      });
+
+      // In full view, so the click needs no scroll of its own.
+      await expect(remove).toBeInViewport({ ratio: 1 });
+      await remove.click();
       await expect(order.qty("wings")).toHaveValue("0");
       await expect(order.count).toHaveText("1 item");
     });

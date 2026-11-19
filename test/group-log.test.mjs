@@ -230,6 +230,26 @@ describe("no full address in either log", () => {
       assert.equal(maskEmail(LONG), "pat**********ple@far**************org");
     });
 
+  // The email rule refuses these, but each is a whole address all the
+  // same, so it is masked and keeps its ref (#678, round two).
+  for (const odd of ["pat@bücher.de", "pat@ex_ample.com", "pat@[10.0.0.1]"]) {
+    it(`masks ${odd}, which the email rule refuses, with its ref`,
+      async () => {
+        const stores = testStores();
+
+        await audit(stores, { group: "vff", by: { role: "host", email: odd },
+          action: "member.remove", target: odd, now });
+
+        const [act] = await auditLog(stores, "vff");
+
+        assert.equal(act.by.email, maskEmail(odd));
+        assert.equal(act.target, maskEmail(odd));
+        assert.deepEqual(act.refs,
+          { "by.email": refOf(odd), target: refOf(odd) });
+        assert.ok(!JSON.stringify(act).includes(odd));
+      });
+  }
+
   it("still lists the members with their full addresses for the host",
     async () => {
       const stores = await withPeople();

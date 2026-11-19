@@ -31,7 +31,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { maskEmail } from "./mask.mjs";
 import { allCustomers } from "./records.mjs";
-import { looksLikeEmail } from "../../../assets/scripts/utils/email.js";
+import { mayBeEmail } from "../../../assets/scripts/utils/email.js";
 
 const ANY_ADDRESS = /[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 
@@ -40,10 +40,12 @@ export const refOf = (email) => createHash("sha256")
   .update(String(email || "").trim().toLowerCase()).digest("hex");
 
 // A value with every address in it masked, and the hash of each that
-// was a whole string, by its path: { value, refs }.
+// was a whole string, by its path: { value, refs }. A whole string is
+// taken for an address by mayBeEmail, not by the email rule, so one
+// the rule refuses (pat@bücher.de) is still masked, with its ref.
 const masking = (value, path = "", refs = {}) => {
   if (typeof value === "string") {
-    if (looksLikeEmail(value)) {
+    if (mayBeEmail(value)) {
       refs[path] = refOf(value);
 
       return { value: maskEmail(value), refs };

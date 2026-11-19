@@ -20,6 +20,7 @@
 import { getStore } from "@netlify/blobs";
 
 import { log } from "./log.mjs";
+import { maskEmail } from "./mask.mjs";
 
 export const STORES = ["orders", "customers", "auth", "stock", "jobs", "gate"];
 
@@ -41,26 +42,76 @@ export const storeName = (name, env = process.env) => {
   return context && context !== "production" ? `${context}-${name}` : name;
 };
 
+// A key in a log line: its kind kept, every part after it masked as
+// lib/mask.mjs masks an address (a key can hold an email or a pass
+// code). customer/pat@example.com -> customer/***@exa*****com.
+export const maskKey = (key) => {
+  const [kind, ...rest] = String(key).split("/");
+
+  return [kind, ...rest.map(maskEmail)].join("/");
+};
+
+// A conditional write (`onlyIfMatch` or `onlyIfNew`) -> whether the
+// store took it (#677). Blobs' client calls the write refused only on a
+// 412: any other refusal (a 409), or a 5xx it has stopped retrying,
+// comes back `modified: true` (@netlify/blobs 11.1.0, Store#setJSON).
+// The status it got is on the trace span a caller may pass it (its
+// typed `span` option), so a 200 is a write made. Any other answer is
+// settled by reading the key back: this write's own value there means
+// the store took it and only the answer was lost (a 5xx after storing
+// it, or the 412 the client's retry of it met), so the caller does not
+// make it twice. Anything else is a write not made, which the caller
+// reads again and retries as it does a lost race.
+const conditional = async (blobs, key, value, condition) => {
+  let status = null;
+  const span = {
+    setAttributes: (attributes) => {
+      if ("blobs.response.status" in attributes) {
+        status = attributes["blobs.response.status"];
+      }
+    },
+  };
+
+  await blobs.setJSON(key, value, { ...condition, span });
+  if (status === 200) return { made: true };
+
+  const stored = await blobs.get(key, { type: "json" });
+  const made = stored !== null
+    && JSON.stringify(stored) === JSON.stringify(value);
+
+  log.warn({
+    event: made ? "blobs.answer_lost" : "blobs.write_refused",
+    store: String(blobs.name || "").replace(/^site:/, ""),
+    key: maskKey(key), status,
+  });
+
+  return { made, stored, status };
+};
+
 export const wrap = (blobs) => ({
   get: (key) => blobs.get(key, { type: "json" }),
   set: (key, value) => blobs.setJSON(key, value),
+  // A create refused by anything but a 412 while the key is still
+  // empty is no lost race: nobody else holds the key, so it throws
+  // rather than say somebody does.
   create: async (key, value) => {
-    const { modified } = await blobs.setJSON(key, value, { onlyIfNew: true });
+    const { made, stored, status } = await conditional(blobs, key, value, {
+      onlyIfNew: true,
+    });
 
-    return modified;
+    if (!made && stored === null && status !== 412) {
+      throw new Error(`The store refused to create ${maskKey(key)}.`);
+    }
+
+    return made;
   },
   getTagged: async (key) => {
     const found = await blobs.getWithMetadata(key, { type: "json" });
 
     return found ? { value: found.data, etag: found.etag } : null;
   },
-  swap: async (key, value, etag) => {
-    const { modified } = await blobs.setJSON(key, value, {
-      onlyIfMatch: etag,
-    });
-
-    return modified;
-  },
+  swap: async (key, value, etag) =>
+    (await conditional(blobs, key, value, { onlyIfMatch: etag })).made,
   delete: (key) => blobs.delete(key),
   // -> [{ key }] with the prefix kept, sorted by key.
   list: async (prefix) => {

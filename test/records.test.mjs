@@ -45,12 +45,21 @@ describe("create-only writes (#253)", () => {
       assert.deepEqual(await mem.get("id/A"), { key: "k1" });
 
       const seen = [];
+      const kept = new Map();
+      // As the real client does, the stub puts the status on the trace
+      // span it is given (#677); the span itself is not recorded.
       const blobs = wrap({
-        setJSON: async (key, value, options) => {
+        setJSON: async (key, value, { span, ...options }) => {
           seen.push([key, value, options]);
 
-          return { modified: seen.length === 1 };
+          const modified = seen.length === 1;
+
+          if (modified) kept.set(key, value);
+          span.setAttributes({ "blobs.response.status": modified ? 200 : 412 });
+
+          return { modified };
         },
+        get: async (key) => kept.get(key) ?? null,
       });
 
       assert.equal(await blobs.create("id/A", { key: "k1" }), true);

@@ -29,6 +29,7 @@ import { indexCatalog } from "../../assets/scripts/order/lib/catalog.mjs";
 import { perkEffects } from "../../assets/scripts/order/lib/perks.mjs";
 import { lockOn } from "../../assets/scripts/order/lib/totals.mjs";
 import { validateOrder } from "../../assets/scripts/order/lib/validate.mjs";
+import { fieldError } from "../../assets/scripts/utils/field-errors.mjs";
 import { parts, today } from "../../assets/scripts/order/lib/zoned.mjs";
 import { saveCart } from "./lib/account.mjs";
 import { sessionFrom } from "./lib/auth.mjs";
@@ -647,6 +648,19 @@ export const handle = async (req, {
       return json(409, { errors: { payment: error.message }, code });
     }
     if (error && error.name === "OrderCollisionError") return collided();
+    // Square refused the address our own rule passed (#678): it is the
+    // customer's to correct, as an error on the email field, and no
+    // money moved, since the customer comes before the charge.
+    if (error && error.emailRefused) {
+      log.info({ event: "order.email_refused", id: order.id, attempt });
+      await giveBack();
+
+      return json(422, {
+        errors: {
+          "customer.email": fieldError("email", order.customer.email),
+        },
+      });
+    }
 
     log.error({
       event: "order.failed",

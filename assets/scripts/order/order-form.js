@@ -44,6 +44,7 @@ import { forget, me } from "../session/session.js";
 import { watchSignIn } from "../session/watch.js";
 import { api } from "../utils/api.js";
 import { setBusy as spin } from "../utils/busy-button.js";
+import { looksLikeEmail } from "../utils/email.js";
 import { setWhole } from "../utils/keep-together.mjs";
 import { whileLoading } from "../utils/skeleton.js";
 
@@ -2205,8 +2206,9 @@ export class OrderForm {
     qs(node, "[data-out='message']").textContent = message;
     qs(node, "[data-out='summary']").textContent = text;
     // The farm's own address and number, from the page's data; only a
-    // plain address or number becomes a link.
-    if (/^[^\s@?&#:/]+@[^\s@?&#:/]+$/.test(this.contact.email)) {
+    // plain address or number becomes a link. The address goes into
+    // the link encoded, so the one email rule is enough (#678).
+    if (looksLikeEmail(this.contact.email)) {
       mail.href = `mailto:${encodeURIComponent(this.contact.email)}` +
         `?subject=` +
         `${encodeURIComponent("Order from the website")}&body=` +

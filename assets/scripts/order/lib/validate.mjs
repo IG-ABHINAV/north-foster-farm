@@ -14,11 +14,10 @@ import { today } from "./zoned.mjs";
 import {
   enterField, fieldError,
 } from "../../utils/field-errors.mjs";
+import { looksLikeEmail, normalizeEmail } from "../../utils/email.js";
 
 export const METHODS = ["onfarm", "scheduled", "delivery"];
 export const CONTACT = ["text", "call"];
-
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 const text = (value, max = 200) =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -133,7 +132,9 @@ export const validateOrder = (payload, {
   // The full name stays on the record: templates, Square, the CLI and
   // orders placed before the split all read it.
   const name = [firstName, lastName].filter(Boolean).join(" ");
-  const email = text(customer.email, 254).toLowerCase();
+  // Normalized before it is checked, so the record and Square carry
+  // the address without a trailing period (#678).
+  const email = normalizeEmail(text(customer.email, 254));
   const phone = text(customer.phone, 40);
   const contact = text(customer.contact, 10);
   // The farm-news box. Only a ticked box means anything: it opts the
@@ -144,7 +145,7 @@ export const validateOrder = (payload, {
     errors["customer.firstName"] = "Please enter your first name.";
   }
   if (!lastName) errors["customer.lastName"] = "Please enter your last name.";
-  if (!EMAIL.test(email)) {
+  if (!looksLikeEmail(email)) {
     errors["customer.email"] = fieldError("email", email);
   }
   // Delivery needs a phone for the driver; pickup and the drop site

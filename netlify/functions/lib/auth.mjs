@@ -34,6 +34,9 @@ import {
   activePerks, publicPerk,
 } from "../../../assets/scripts/order/lib/perks.mjs";
 import { today } from "../../../assets/scripts/order/lib/zoned.mjs";
+import {
+  looksLikeEmail, normalizeEmail,
+} from "../../../assets/scripts/utils/email.js";
 
 const MINUTE = 60_000;
 
@@ -50,12 +53,11 @@ export const COOKIE = "nff_session";
 // A customer's choice for videos playing on their own.
 export const AUTOPLAY = ["on", "off"];
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+// The one email rule (assets/scripts/utils/email.js, #678), under the
+// names this module's callers use.
+export { normalizeEmail };
 
-export const normalizeEmail = (email) =>
-  String(email || "").trim().toLowerCase();
-
-export const validEmail = (email) => EMAIL.test(normalizeEmail(email));
+export const validEmail = (email) => looksLikeEmail(email);
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const secret = () => randomBytes(32).toString("base64url");

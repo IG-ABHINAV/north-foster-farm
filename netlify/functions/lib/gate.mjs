@@ -18,6 +18,9 @@
 //   rate/ip/<sha256(ip)>      { times: [...] }
 
 import gate from "../../../data/gate.json" with { type: "json" };
+import {
+  looksLikeEmail, normalizeEmail,
+} from "../../../assets/scripts/utils/email.js";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -38,19 +41,21 @@ export const MAIL_CEILING = {
   hour: gate.mailCeiling.perHour, day: gate.mailCeiling.perDay,
 };
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const DOMAIN = /^@[^\s@/]+\.[^\s@/]{2,}$/;
 
-export const normalize = (value) => String(value || "").trim().toLowerCase();
+// The one email rule (assets/scripts/utils/email.js, #678). It has no
+// imports of its own, so Deno takes it too.
+export const normalize = normalizeEmail;
 
-export const validEmail = (value) => EMAIL.test(normalize(value));
+export const validEmail = (value) => looksLikeEmail(value);
 
 // An allowlist entry as typed -> "pat@example.com" or "@example.com"
 // (every address at that domain, not its subdomains), else null.
 export const parseEntry = (value) => {
   const entry = normalize(value);
 
-  return !entry.includes("*") && (EMAIL.test(entry) || DOMAIN.test(entry))
+  return !entry.includes("*")
+    && (looksLikeEmail(entry) || DOMAIN.test(entry))
     ? entry : null;
 };
 

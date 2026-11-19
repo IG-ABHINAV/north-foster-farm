@@ -31,8 +31,8 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { maskEmail } from "./mask.mjs";
 import { allCustomers } from "./records.mjs";
+import { looksLikeEmail } from "../../../assets/scripts/utils/email.js";
 
-const ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ANY_ADDRESS = /[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 
 // The hash a record keeps of an address it masked.
@@ -43,7 +43,7 @@ export const refOf = (email) => createHash("sha256")
 // was a whole string, by its path: { value, refs }.
 const masking = (value, path = "", refs = {}) => {
   if (typeof value === "string") {
-    if (ADDRESS.test(value.trim())) {
+    if (looksLikeEmail(value)) {
       refs[path] = refOf(value);
 
       return { value: maskEmail(value), refs };

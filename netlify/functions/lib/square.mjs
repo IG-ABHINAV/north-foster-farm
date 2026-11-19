@@ -533,15 +533,30 @@ const createCustomer = async (cfg, customer, idempotencyKey, ref,
   return created.customer;
 };
 
+// Square's refusal of the address itself: 400 INVALID_VALUE on field
+// `email` (#678). Nothing else counts.
+const refusesEmail = (error) => error instanceof SquareError
+  && error.status === 400 && Array.isArray(error.detail)
+  && error.detail.some((e) => e && e.code === "INVALID_VALUE"
+    && e.field === "email");
+
+// -> { id, made }; a refusal of the address by the search or the
+// create is thrown marked `emailRefused`, for the order to answer as
+// an error on the email field rather than a failure of ours.
 const findOrCreateCustomer = async (cfg, customer, key, fetchImpl, ref) => {
-  const c = await searchCustomer(cfg, customer.email, fetchImpl);
+  try {
+    const c = await searchCustomer(cfg, customer.email, fetchImpl);
 
-  if (c) return { id: c.id, made: !!ref && c.reference_id === ref };
+    if (c) return { id: c.id, made: !!ref && c.reference_id === ref };
 
-  const created = await createCustomer(cfg, customer, `${key}-customer`, ref,
-    fetchImpl);
+    const created = await createCustomer(cfg, customer, `${key}-customer`,
+      ref, fetchImpl);
 
-  return { id: created.id, made: !!ref };
+    return { id: created.id, made: !!ref };
+  } catch (error) {
+    if (refusesEmail(error)) error.emailRefused = true;
+    throw error;
+  }
 };
 
 // --- A member's code on their Square profile (#131) -------------------

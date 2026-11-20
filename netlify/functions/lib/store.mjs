@@ -21,6 +21,7 @@ import { getStore } from "@netlify/blobs";
 
 import { log } from "./log.mjs";
 import { maskEmail } from "./mask.mjs";
+import { ORDER_ID } from "./order-id.mjs";
 
 export const STORES = ["orders", "customers", "auth", "stock", "jobs", "gate"];
 
@@ -42,13 +43,22 @@ export const storeName = (name, env = process.env) => {
   return context && context !== "production" ? `${context}-${name}` : name;
 };
 
-// A key in a log line: its kind kept, every part after it masked as
-// lib/mask.mjs masks an address (a key can hold an email or a pass
-// code). customer/pat@example.com -> customer/***@exa*****com.
+// A key in a log line: its kind kept, an email address in it masked as
+// lib/mask.mjs masks one (#496) and an order id the same way, and any
+// other part hidden in full. That covers a pass code, a bearer code
+// of which a few characters narrow the guesses (#683), and a member
+// id. customer/pat@example.com -> customer/***@exa*****com,
+// pass/ABCD-EFGH -> pass/***.
+const maskSegment = (part) => {
+  if (!part) return part;
+
+  return part.includes("@") || ORDER_ID.test(part) ? maskEmail(part) : "***";
+};
+
 export const maskKey = (key) => {
   const [kind, ...rest] = String(key).split("/");
 
-  return [kind, ...rest.map(maskEmail)].join("/");
+  return [kind, ...rest.map(maskSegment)].join("/");
 };
 
 // A conditional write (`onlyIfMatch` or `onlyIfNew`) -> whether the

@@ -269,7 +269,7 @@ export const ORDER_METADATA = Object.freeze({
   site_version: SITE_VERSION,
   order_flow: "order-page",
 });
-export const ORDER_ID = /^NFF-\d{4}-[A-Z0-9]{4}$/;
+export { ORDER_ID } from "./order-id.mjs";
 
 export const e164 = (phone) => {
   const d = String(phone || "").replace(/\D/g, "");

@@ -210,16 +210,25 @@ const alertTripped = async (env, fetchImpl, body) => {
 
 // Stop all sending, then do the rest. The flag is written first and
 // with `create`, so of two racing trips one acts and sending has
-// stopped even if a later step fails.
+// stopped even if a later step fails. A store that cannot take the
+// flag (the create throws, #683) is no other trip: this one revokes
+// the key and alerts anyway, since neither needs the store, and a key
+// revoked twice is harmless.
 // -> the state document.
 export const trip = async (stores, reason, detail = {}, {
   env = process.env, now = new Date(), fetchImpl = globalThis.fetch,
 } = {}) => {
   const state = { tripped: true, at: now.toISOString(), reason, detail };
+  let first = true;
 
-  if (!(await stores.jobs.create(STATE, state))) {
-    return (await readState(stores)) || state;
+  try {
+    first = await stores.jobs.create(STATE, state);
+  } catch (error) {
+    log.error({
+      event: "resend.breaker_flag_failed", reason, error: String(error),
+    });
   }
+  if (!first) return (await readState(stores)) || state;
 
   log.error({ event: "resend.breaker_tripped", reason, ...detail });
 

@@ -97,6 +97,36 @@ describe("the send breaker: our own sends", () => {
 });
 
 describe("the send breaker: a foreign send", () => {
+  // The store wrap's create throws when the store refuses it with the
+  // key still empty (#677); that must not stop the trip (#683).
+  it("revokes the key and alerts when the store refuses the flag",
+    async (t) => {
+      const stores = testStores();
+      const w = world();
+      const lines = [];
+
+      t.mock.method(console, "error", (text) => {
+        lines.push(JSON.parse(text));
+      });
+      t.mock.method(stores.jobs, "create", async () => {
+        throw new Error("The store refused to create breaker/***.");
+      });
+
+      await onSent(stores, sent("msg_not_ours"), {
+        env, now, fetchImpl: w.fetchImpl, wait: noWait,
+      });
+
+      assert.deepEqual(w.keys.map((k) => k.id), ["k_audience"]);
+      assert.deepEqual(
+        w.calls.filter((c) => c.url.startsWith("https://hc."))
+          .map((c) => c.url),
+        ["https://hc.example/alert/fail", "https://hc.example/alert"],
+      );
+      assert.ok(lines.some((l) => l.event === "resend.breaker_flag_failed"
+        && l.reason === "foreign" && /refused to create/.test(l.error)));
+      assert.ok(lines.some((l) => l.event === "resend.breaker_tripped"));
+    });
+
   it("trips at once, deletes the sending key, alerts without Resend",
     async () => {
       const stores = testStores();

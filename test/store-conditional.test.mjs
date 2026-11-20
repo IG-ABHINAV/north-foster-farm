@@ -82,9 +82,9 @@ const refusingPuts = (fake, status) => async (url, options = {}) => (
     ? new Response(null, { status })
     : fake.fetch(url, options));
 
-const PATH = "/site/site:orders/order/NFF-1001";
-const KEY = "order/NFF-1001";
-const ORDER = { id: "NFF-1001", customer: { email: "pat@example.com" } };
+const PATH = "/site/site:orders/order/NFF-2611-K3WM";
+const KEY = "order/NFF-2611-K3WM";
+const ORDER = { id: "NFF-2611-K3WM", customer: { email: "pat@example.com" } };
 
 const watch = (t) => {
   const lines = [];
@@ -118,7 +118,7 @@ describe("a conditional write through the store", () => {
       assert.equal(await store.swap(KEY, { n: 2 }, etag), false);
       assert.deepEqual(fake.read(PATH), { n: 1, secret: "contents" });
       assert.deepEqual(lines.map((l) => [l.event, l.store, l.key, l.status]),
-        [["blobs.write_refused", "orders", "order/nff**001", 409]]);
+        [["blobs.write_refused", "orders", "order/nff*******3wm", 409]]);
       assert.ok(!JSON.stringify(lines).includes("contents"));
     });
 
@@ -158,7 +158,7 @@ describe("a conditional write through the store", () => {
         (n) => (n === 1 ? 500 : null));
       const stores = { orders: storeOver(fake.fetch) };
 
-      await updateOrder(stores, "NFF-1001", (order) => ({
+      await updateOrder(stores, "NFF-2611-K3WM", (order) => ({
         ...order, history: [...order.history, { event: "noted" }],
       }));
 
@@ -171,13 +171,13 @@ describe("a conditional write through the store", () => {
       const fake = edge([[PATH, { ...ORDER, status: "paid" }]]);
       const stores = { orders: storeOver(refusingPuts(fake, 409)) };
 
-      await assert.rejects(updateOrder(stores, "NFF-1001", (order) => ({
+      await assert.rejects(updateOrder(stores, "NFF-2611-K3WM", (order) => ({
         ...order, status: "cancelled",
       })), /too fast to save/);
       assert.equal(fake.read(PATH).status, "paid");
       assert.equal(lines.length, 8);
       assert.ok(lines.every((l) => l.event === "blobs.write_refused"
-        && l.status === 409 && l.key === "order/nff**001"));
+        && l.status === 409 && l.key === "order/nff*******3wm"));
       assert.ok(!JSON.stringify(lines).includes("paid"));
     });
 });
@@ -196,7 +196,7 @@ describe("a create through the store", () => {
     const store = storeOver(refusingPuts(edge([]), 409));
 
     await assert.rejects(store.create(KEY, { key: "mine" }),
-      /refused to create order\/nff\*\*001/);
+      /refused to create order\/nff\*{7}3wm/);
   });
 });
 
@@ -204,8 +204,21 @@ describe("maskKey", () => {
   it("keeps the kind and masks every part after it", () => {
     assert.equal(maskKey("customer/pat.smith@example.com"),
       "customer/pat***ith@exa*****com");
-    assert.equal(maskKey("by-email/pat@example.com/NFF-1001"),
-      "by-email/***@exa*****com/nff**001");
+    assert.equal(maskKey("by-email/pat@example.com/NFF-2611-K3WM"),
+      "by-email/***@exa*****com/nff*******3wm");
     assert.equal(maskKey("jobs"), "jobs");
+  });
+
+  it("hides a pass code in full, keeping only its kind", () => {
+    assert.equal(maskKey("pass/ABCD-EFGH"), "pass/***");
+  });
+
+  it("hides in full every part that is no email or order id", () => {
+    assert.equal(maskKey("member-id/NFM-ABCD2345"), "member-id/***");
+    assert.equal(maskKey("token/9f86d081884c7d659a2feaa0c55ad015"),
+      "token/***");
+    assert.equal(maskKey("support/pat@example.com/x7k2m9q4"),
+      "support/***@exa*****com/***");
+    assert.equal(maskKey("breaker/unsent/"), "breaker/***/");
   });
 });

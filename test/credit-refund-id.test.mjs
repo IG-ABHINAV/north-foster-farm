@@ -73,6 +73,30 @@ describe("a restore's refund id (#684)", () => {
       assert.equal(lines(again.ledger).length, 2);
     });
 
+  it("tells one refund id on two of a member's orders apart, and still " +
+    "restores each once", async () => {
+    const stores = testStores();
+    const now = ny("2026-11-25");
+    const OTHER = "NFF-2611-P7QD";
+    const back = (orderId) => restoreCredit(stores, EMAIL, {
+      orderId, amount: 400, refundId: "edit-k-0", now,
+    });
+
+    await member(stores);
+    await spendCredit(stores, EMAIL, {
+      orderId: OTHER, amount: 500, now: ny("2026-11-24", 10),
+    });
+
+    const mine = await back(ORDER);
+    const theirs = await back(OTHER);
+    const again = await back(OTHER);
+
+    assert.deepEqual([mine.restored, theirs.restored, again.restored],
+      [400, 400, 400]);
+    assert.equal(await creditBalance(stores, EMAIL, now), 800);
+    assert.equal(lines(await getLedger(stores, EMAIL)).length, 2);
+  });
+
   it("restores every time without a refund id, as before", async () => {
     const stores = testStores();
     const now = ny("2026-11-25");

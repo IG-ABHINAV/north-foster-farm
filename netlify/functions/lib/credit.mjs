@@ -167,9 +167,12 @@ export const spendCredit = (stores, email, {
   return { ...ledger, entries };
 });
 
-// The ledger's lines a refund put back, by the refund's id.
-const linesOf = (ledger, refundId) => ledger.entries
-  .flatMap((e) => (e.spent || []).filter((x) => x.refundId === refundId));
+// The ledger's lines a refund put back, by the order and the refund's
+// id. The order counts too: an edit's key comes from the browser, and
+// one key reused on two orders must not swallow the second restore.
+const linesOf = (ledger, orderId, refundId) => ledger.entries
+  .flatMap((e) => (e.spent || []).filter((x) =>
+    x.orderId === orderId && x.refundId === refundId));
 
 // Puts credit back after a refund: onto the grants the order spent,
 // up to `amount`, whatever their expiry (the member lost nothing by
@@ -188,7 +191,7 @@ export const restoreCredit = async (stores, email, {
   const ledger = await swapLedger(stores, email, (stored) => {
     let left = amount;
     const at = now.toISOString();
-    const done = refundId ? linesOf(stored, refundId) : [];
+    const done = refundId ? linesOf(stored, orderId, refundId) : [];
 
     restored = -done.reduce((s, x) => s + x.amount, 0);
     if (done.length) return null;

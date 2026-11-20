@@ -17,7 +17,7 @@
 import { readFileSync } from "node:fs";
 
 import { CUSTOMER, ORDER, dates } from "./support/canned.mjs";
-import { SKU, expect, test } from "./support/order.mjs";
+import { SKU, expect, stockApplied, test } from "./support/order.mjs";
 import { deliveryDates } from "../assets/scripts/order/lib/dates.mjs";
 import { parseSchedule } from "../assets/scripts/order/lib/schedule.mjs";
 import { instant } from "../assets/scripts/order/lib/zoned.mjs";
@@ -187,8 +187,17 @@ test.describe("an order on a replaced Thursday, on the order page (#643)",
 
       const { clock, sent } = await setUp(page, context, baseURL,
         BEFORE_CUTOFF);
+      // The page's first stock load has to land before the clock jumps.
+      // page.clock fakes AbortSignal.timeout too, so a load still in
+      // flight during runFor is aborted at once, with its backoff and
+      // every retry, and the page shuts behind the stock notice. The
+      // real staging /api/stock is often slower than reaching runFor
+      // (run 44766787153, attempts 2 and 3, desktop).
+      const stock = page.waitForResponse("**/api/stock");
 
       await openEdit(page);
+      await stock;
+      await stockApplied(page);
       await fewerEggs(page);
       // The page stays open past noon on the 9th.
       clock.now = AFTER_CUTOFF;

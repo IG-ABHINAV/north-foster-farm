@@ -1134,6 +1134,13 @@ export const missingPingKey = (env) => sendsForReal(env) && !env[PING_KEY];
 // counts as sent, as the pending record printed it, and the change is
 // caught later. Every group is tried; if any fails, nothing is
 // recorded printed and the run throws, so the next one tries again.
+// Each group that goes adds its orders to the pending record's `sent`
+// as it goes (2026-11-20, #694). The run that finishes records every
+// one of them printed, from its pending snapshot when no group sent it
+// this time: an order cancelled or moved before the retry has left
+// today's choice, yet its slip is on the farm's pile, so the next
+// packet or "Changed after printing" brings its CANCELED or revised
+// sheet.
 //
 // The fixed time is the packet's cutoff, kept by `sentKey` as `cutoff`:
 // the run's `now`, taken when the 15-minute run starts, a little before
@@ -1166,6 +1173,20 @@ const sendPacket = async (stores, {
   const links = mailLinks(env);
   const records = [];
   const failed = [];
+  const asPending = (ids) => pending.entries
+    .filter((r) => ids.includes(r.id))
+    .map((r) => ({ id: r.id, date: r.date, snapshot: r.snapshot }));
+  // Each group that goes adds its orders to `pending.sent` at once, so
+  // a retry still records them printed when a change since has taken
+  // them out of today's choice and no group sends them again.
+  const went = async (ids) => {
+    const sent = pending.sent || [];
+    const more = ids.filter((id) => !sent.includes(id));
+
+    if (!more.length) return;
+    pending = { ...pending, sent: [...sent, ...more] };
+    await stores.jobs.set(pendingKey, pending);
+  };
   const send = async (message, ids) => {
     try {
       await mail({ to, ...message }, { env });
@@ -1178,9 +1199,9 @@ const sendPacket = async (stores, {
         return;
       }
       log.warn({ event, day });
-      records.push(...pending.entries.filter((r) => ids.includes(r.id))
-        .map((r) => ({ id: r.id, date: r.date, snapshot: r.snapshot })));
+      records.push(...asPending(ids));
     }
+    await went(ids);
   };
 
   for (const g of groups) {
@@ -1189,7 +1210,7 @@ const sendPacket = async (stores, {
     await send({
       idempotencyKey: `${idempotencyKey}-${g.key}`,
       ...farmPackingSlips(g.entries, {
-        day, place: g.place, late, next, since, filename, links,
+        day, place: g.place, late, next, since, links,
         ...countsOf(g.entries),
       }),
       attachments: [attachment(filename, packetPdf({
@@ -1205,6 +1226,11 @@ const sendPacket = async (stores, {
     }, []);
   }
   if (failed.length) throw failed[0];
+
+  const recorded = new Set(records.map((r) => r.id));
+
+  records.push(...asPending((pending.sent || [])
+    .filter((id) => !recorded.has(id))));
 
   const summary = {
     day, late, quiet: !groups.length, ...countsOf(entries),

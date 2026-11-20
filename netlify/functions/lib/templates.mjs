@@ -2290,7 +2290,7 @@ const packetLine = (e) => {
 // never stands for a failure. Wording is a draft.
 export const farmPackingSlips = (entries, {
   day, place = null, late = false, quiet = false, slips = 0, revised = 0,
-  cancelled = 0, filename = "", links, next = null, since = null,
+  cancelled = 0, links, next = null, since = null,
 } = {}) => {
   const when = label(day);
 
@@ -2300,8 +2300,8 @@ export const farmPackingSlips = (entries, {
     return {
       subject: title,
       ...render(title, [
-        p(`No order is due ${when}. The ${next || "6 AM"} email brings ` +
-          "any that come in after this one."),
+        p(`No order is due ${when}. If one comes in after this, its slip ` +
+          `comes at ${next || "6 AM"}.`),
         adminFooter(links),
       ], links, { tag: "Packing slips" }),
     };
@@ -2310,23 +2310,23 @@ export const farmPackingSlips = (entries, {
   const where = place || packingGroup(entries[0].order.fulfilment).place;
   const title = `${late ? "Late: " : ""}${where} packing slips for ${
     shortDay(day)}`;
-  let scope = p(`It has every slip in this group for today, ${when}. ` +
-    "Yesterday's 3 PM slips didn't go, so there are no others.");
+  let scope = p("Yesterday's 3 PM email didn't go out, so this has every " +
+    `slip for today, ${when}.`);
 
   if (late) {
-    scope = p(`These came in, changed, or were canceled after yesterday's ${
-      since || "3 PM"} slips for today, ${when}. Pack the rest from those.`);
+    scope = p(`These orders for today, ${when}, came in, changed, or were ` +
+      `canceled after yesterday's ${since || "3 PM"} slips. Pack the rest ` +
+      "from yesterday's slips.");
   } else if (next) {
-    scope = p(`It has every slip in this group for ${when}, and replaces ` +
-      `any slip printed for those orders earlier. The ${next} email brings ` +
-      "any that come in, change, or are canceled after this one.");
+    scope = p(`Here is every slip for ${when}. It replaces any printed for ` +
+      "those orders earlier. Anything that comes in, changes, or is " +
+      `canceled after this comes at ${next}.`);
   }
 
   return {
     subject: title,
     ...render(title, [
-      p(`Print the attached PDF${filename ? `, ${filename}` : ""}. It ` +
-        "opens with the pick list for every slip in it."),
+      p("Print the attached PDF. It opens with the pick list."),
       scope,
       revised || cancelled
         ? p("A **revised** order has a sheet saying what changed, then a " +
@@ -2343,7 +2343,7 @@ export const farmPackingSlips = (entries, {
   };
 };
 
-// An order due today that changed after this morning's packet. The
+// An order due today that changed after its slip was printed. The
 // sheets are attached. Wording is a draft.
 export const farmChangedAfterPrint = (entry, { date, links } = {}) => {
   const id = entry.order.id;
@@ -2354,11 +2354,11 @@ export const farmChangedAfterPrint = (entry, { date, links } = {}) => {
   const blocks = [
     p(cancelled
       ? `**${id}** is due today, ${label(date)}, and was canceled after ` +
-        "this morning's packing slips went out. Don't pack it. The " +
-        "attached sheet says so for the packing table."
-      : `**${id}** is due today, ${label(date)}, and changed after this ` +
-        "morning's packing slips went out. The attached PDF has a sheet " +
-        "saying what changed and a new slip: throw away the old one."),
+        "its packing slip went out. Don't pack it. The attached sheet " +
+        "says so for the packing table."
+      : `**${id}** is due today, ${label(date)}, and changed after its ` +
+        "packing slip went out. The attached PDF has a sheet saying what " +
+        "changed and a new slip: throw away the old one."),
   ];
 
   if (!cancelled && entry.changes.length) {

@@ -81,12 +81,15 @@ export const shortDay = (iso) => `${dayName(weekday(iso))} ${
 // A town and the occasion's name, the town said once: "Pawtucket" and
 // "Thanksgiving Prep" make "Pawtucket Thanksgiving Prep", while
 // "Pawtucket Farmers Market" and "Scituate Rotary Farmers Market" (in
-// North Scituate) already say where they are and stand alone.
+// North Scituate) already say where they are and stand alone. So does
+// a name that holds its venue (2026-11-20, communications on PR #695):
+// "Summer Market at Tilted Barn", never "Exeter Summer Market at ...".
 export const townAndName = (town, name) => {
   const words = ` ${String(name).replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
   const said = (w) => words.includes(` ${w} `);
 
   return !town || said(town) || said(town.split(/\s+/).at(-1))
+    || / at /.test(String(name))
     ? name : `${town} ${name}`;
 };
 

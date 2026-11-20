@@ -335,7 +335,7 @@ const groupMail = (key, { late = false } = {}) => (links) => {
 
   return {
     ...t.farmPackingSlips(entries, {
-      day, place, late, filename, links, ...countsOf(entries),
+      day, place, late, links, ...countsOf(entries),
       ...late ? { since: EVE_TIME } : { next: PACKING_TIME },
     }),
     attachments: [attachment(filename, packetPdf({

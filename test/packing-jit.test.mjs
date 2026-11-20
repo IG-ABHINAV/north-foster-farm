@@ -2,7 +2,9 @@
 // email per group), 2026-11-20: the code the criteria tests in
 // test/packing-groups.test.mjs don't reach. The place names, a retry
 // that sends no group twice, a morning with no 3 PM packet before it,
-// and an order moved off its day after its slip was printed. Every
+// and an order moved off its day after its slip was printed. Since
+// qa's review (2026-11-20), an order mailed on a failed run that is
+// cancelled or moved before the retry. Every
 // order is a fake from the staging library; no mail leaves the test.
 
 import assert from "node:assert/strict";
@@ -19,7 +21,9 @@ import {
   EVE, PENDING, PING_KEY, SENT, groupFileName, packingDaily, packingEve,
   readPrinted,
 } from "../netlify/functions/lib/packing.mjs";
-import { amendOrder, saveOrder } from "../netlify/functions/lib/records.mjs";
+import {
+  amendOrder, saveOrder, setStatus,
+} from "../netlify/functions/lib/records.mjs";
 import { testStores } from "../netlify/functions/lib/store.mjs";
 import { instant } from "../assets/scripts/order/lib/zoned.mjs";
 
@@ -81,6 +85,11 @@ describe("a packing group's place (#694)", () => {
     assert.equal(townAndName("North Scituate",
       "Scituate Rotary Farmers Market"), "Scituate Rotary Farmers Market");
     assert.equal(townAndName("", "Apple Fest"), "Apple Fest");
+    assert.equal(townAndName("Exeter", "Summer Market at Tilted Barn"),
+      "Summer Market at Tilted Barn", "a name holding its venue");
+    assert.equal(
+      townAndName("Warwick", "Pop-up at The Village Family Fitness"),
+      "Pop-up at The Village Family Fitness");
   });
 
   it("names each group the farm's way", () => {
@@ -165,6 +174,63 @@ describe("sending the groups (#694)", () => {
         ["North Scituate drop site packing slips for Saturday 11/21"]);
       assert.equal((await stores.jobs.get(`${SENT}${SAT}`)).late, false);
       assert.deepEqual(h.pings, [URL]);
+    });
+
+  // The case qa found on PR #695: the drop site goes, Prep fails, and the
+  // drop site's order changes before the retry, which sends only Prep.
+  const sentThenChanged = async (change) => {
+    const stores = testStores();
+    let down = true;
+    const h = harness((m) => (down && /Thanksgiving/.test(m.subject)
+      ? new Error("Resend 503") : null));
+
+    await saveOrder(stores, atDrop("NFF-2611-DSX1"), placed);
+    await saveOrder(stores, atPrep("NFF-2611-TPX9"), placed);
+    await assert.rejects(packingEve(stores, opts(h, at(FRI, 15))),
+      /Resend 503/);
+    assert.deepEqual((await stores.jobs.get(`${PENDING}${SAT}-eve`)).sent,
+      ["NFF-2611-DSX1"], "the drop site's order is kept as sent");
+    assert.equal((await readPrinted(stores)).size, 0);
+
+    await change(stores);
+    down = false;
+    await packingEve(stores, opts(h, at(FRI, 15, 15)));
+
+    const retry = h.sent.at(-1);
+    const printed = await readPrinted(stores);
+
+    assert.match(retry.subject, /Thanksgiving Prep/);
+    assert.deepEqual([...printed.keys()].sort(),
+      ["NFF-2611-DSX1", "NFF-2611-TPX9"],
+      "the order mailed on the failed run counts as printed");
+    assert.equal(printed.get("NFF-2611-DSX1").date, SAT);
+    await packingDaily(stores, opts(h, at(SAT, 6)));
+
+    const late = h.sent.at(-1);
+
+    assert.equal(late.subject,
+      "Late: North Scituate drop site packing slips for Saturday 11/21");
+
+    return Buffer.from(late.attachments[0].content, "base64")
+      .toString("latin1");
+  };
+
+  it("cancels an order mailed on a failed run, after the retry",
+    async () => {
+      const pdf = await sentThenChanged((stores) => setStatus(stores,
+        "NFF-2611-DSX1", "cancelled", at(FRI, 15, 5)));
+
+      assert.match(pdf, /\(CANCELED\)/);
+    });
+
+  it("revises an order mailed on a failed run and moved before the retry",
+    async () => {
+      const pdf = await sentThenChanged((stores) => amendOrder(stores,
+        "NFF-2611-DSX1", {
+          fulfilment: { ...pickup().fulfilment, date: "2026-11-22" },
+        }, "edited", at(FRI, 15, 5)));
+
+      assert.match(pdf, /\(REVISED\)/);
     });
 
   it("tells the group an order left, after its slip was printed",

@@ -26,7 +26,8 @@ const MESSAGE = "There have been too many tries to place your order. " +
 // own count, so more may be needed when Netlify runs several.
 const MAX_TRIES = 40;
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay again and hit the order limit twice.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("rate limit", () => {
   test.skip(!process.env.E2E_LOCKOUT,

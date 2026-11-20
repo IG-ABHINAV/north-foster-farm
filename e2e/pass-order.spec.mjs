@@ -14,6 +14,9 @@ import {
   deletePass, issuePass, orderRecord, squareOrder, teardown,
 } from "./support/staging.mjs";
 
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ retries: 0 });
+
 const EGGS = 700;
 
 test.describe("a fee-waiving pass in Square (#182)", () => {

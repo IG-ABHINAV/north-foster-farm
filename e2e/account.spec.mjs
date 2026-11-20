@@ -18,7 +18,8 @@ import { followLink } from "./support/request-error.mjs";
 
 const SIGN_IN = "Your secure sign-in link to North Foster Farm";
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay again and reuse a one-time link.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("accounts", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

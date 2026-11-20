@@ -10,6 +10,9 @@ import {
 } from "./support/staging.mjs";
 import { followLink } from "./support/request-error.mjs";
 
+// No retries (#693): a retry would reuse a single-use emailed link.
+test.describe.configure({ retries: 0 });
+
 test.describe("farm news", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);
 

@@ -16,7 +16,8 @@ import {
 
 const ORDER_ID = /^NFF-\d{4}-[A-Z2-9]{6}$/;
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("payments", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

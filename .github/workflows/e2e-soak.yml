@@ -32,6 +32,8 @@ jobs:
     uses: ./.github/workflows/e2e-run.yml
     with:
       passes: 1
+      # Retries off: a soak hunts flakes (#693).
+      retries: 0
       args: --repeat-each=${{ inputs.repeat_each }} ${{ inputs.spec }}
       shards: ${{ inputs.shards }}
       total: ${{ fromJSON(inputs.total) }}

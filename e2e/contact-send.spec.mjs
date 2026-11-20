@@ -20,7 +20,8 @@ import { followLink } from "./support/request-error.mjs";
 // where the limit itself is tested.
 const limit = orderLimitHeaders();
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay again and reuse a one-time link.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("contact messages (#140)", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

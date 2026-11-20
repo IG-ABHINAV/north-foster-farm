@@ -7,9 +7,11 @@ name: E2E
 #
 # What a dispatched full run checks (James, #283, 6302479835):
 #
-#   e2e                  the full suite, run twice with retries off; a
-#                        test must pass both times. Required on staging
-#                        and main, which take only commits next had.
+#   e2e                  the full suite, run twice; a test must pass both
+#                        times, on its first try or one of 2 retries
+#                        (2026-11-20, #693: was retries off). Required
+#                        on staging and main, which take only commits
+#                        next had.
 #   e2e-burn-in-advisory every spec added or changed since staging, ten
 #                        times over, retries off. It blocks nothing
 #                        here, so the agent sees a flaky new spec
@@ -183,6 +185,8 @@ jobs:
     uses: ./.github/workflows/e2e-run.yml
     with:
       passes: 1
+      # Retries off: the burn-in is there to find a flake (#693).
+      retries: 0
       args: >-
         --only-changed=origin/staging --repeat-each=10
         --pass-with-no-tests

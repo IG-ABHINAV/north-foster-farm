@@ -27,6 +27,8 @@ jobs:
     uses: ./.github/workflows/e2e-run.yml
     with:
       passes: 1
+      # Retries off: the burn-in is there to find a flake (#693).
+      retries: 0
       args: >-
         --only-changed=origin/staging --repeat-each=10
         --pass-with-no-tests

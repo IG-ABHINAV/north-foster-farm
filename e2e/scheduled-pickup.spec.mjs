@@ -23,7 +23,8 @@ const SIGN_IN = "Your secure sign-in link to North Foster Farm";
 const ORDER_ID = /^NFF-\d{4}-[A-Z2-9]{6}$/;
 const DROP_SITE = "VFVQ";
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay again and reuse a one-time link.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("a market order, moved to the drop site", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

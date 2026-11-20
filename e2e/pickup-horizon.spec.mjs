@@ -6,6 +6,9 @@
 import { eggOrder, firstPickup, postOrder } from "./support/api.mjs";
 import { expect, test, uniqueEmail } from "./support/order.mjs";
 
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ retries: 0 });
+
 const ZONE = "America/New_York";
 const DAY = 86400000;
 

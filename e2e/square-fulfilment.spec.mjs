@@ -14,7 +14,8 @@ import {
   op, orderRecord, teardown,
 } from "./support/staging.mjs";
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("the farm's actions reach the Square order", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

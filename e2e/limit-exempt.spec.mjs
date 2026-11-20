@@ -15,6 +15,9 @@ import {
   BACK_OFFICE_MISSING, backOffice, orderLimitHeaders,
 } from "./support/staging.mjs";
 
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ retries: 0 });
+
 const TRIES = 30;
 
 test.describe("the staging token and the rate limits", () => {

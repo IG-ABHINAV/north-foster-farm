@@ -8,10 +8,15 @@ name: E2E run
 # playwright.config.mjs when the target is local.
 #
 # Called by e2e.yml, e2e-burn-in.yml and e2e-soak.yml, which name the
-# check. Retries are always off. With passes: 2, each shard runs its
-# share of the suite twice and fails if either pass fails: a pass and
-# a fail on one commit is a flake, and it fails the check rather than
-# being retried away (James, #283).
+# check. A failed test is retried up to `retries` times, 2 unless the
+# caller says (James, 2026-11-20, #693: one transport stall had failed
+# whole runs). A test that passes on a retry is flaky: the run stays
+# green, and Playwright's closing "N flaky" list names it, which
+# `bin/nff e2e` prints. The burn-in and the soak pass retries: 0,
+# since finding flakes is what they are for. Specs that must not run
+# twice set `retries: 0` themselves. With passes: 2, each shard runs
+# its share of the suite twice and fails if either pass fails (James,
+# #283; 2026-11-20, #693: retries were always off until then).
 #
 # The log is public. It prints test titles and results, no records:
 # every order, account and message is made up by the specs, and the
@@ -31,6 +36,10 @@ on:
         type: string
         default: ""
       passes:
+        type: number
+        default: 2
+      retries:
+        description: Times a failed test is tried again
         type: number
         default: 2
       shards:
@@ -121,6 +130,7 @@ jobs:
         env:
           E2E_BASE_URL: http://localhost:${{ env.E2E_PORT }}
           PASSES: ${{ inputs.passes }}
+          RETRIES: ${{ inputs.retries }}
           ARGS: ${{ inputs.args }}
           E2E_PAGES: ${{ inputs.pages }}
           SHARD: ${{ matrix.shard }}/${{ inputs.total }}
@@ -145,7 +155,7 @@ jobs:
             echo "::group::Pass $pass of $PASSES, shard $SHARD"
             # shellcheck disable=SC2086
             if PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/pass-$pass" \
-              npx playwright test --retries=0 --workers="$WORKERS" \
+              npx playwright test --retries="$RETRIES" --workers="$WORKERS" \
               --shard="$SHARD" --reporter=list,html $ARGS
             then result=passed; else result=failed; failed=$((failed + 1))
             fi
@@ -157,7 +167,8 @@ jobs:
           if [ "$failed" -eq 0 ]; then exit 0; fi
           if [ "$failed" -lt "$PASSES" ]; then
             echo "::error title=e2e flake::A pass and a fail on one" \
-              "commit. The flaky test fails the check; fix it or remove it."
+              "commit, past its retries. The test fails the check; fix it" \
+              "or remove it."
           fi
           exit 1
 

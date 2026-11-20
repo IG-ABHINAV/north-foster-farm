@@ -50,13 +50,15 @@ in a fake here. To run it the same way on a machine:
 ```sh
 export E2E_STAGING_TOKEN=$(openssl rand -hex 24)
 npm run e2e:serve -- --port 8895 &   # once /api/dates answers:
-E2E_BASE_URL=http://localhost:8895 npm run e2e -- --retries=0
+E2E_BASE_URL=http://localhost:8895 npm run e2e -- --retries=2
 ```
 
 A push to `next` runs no e2e (#303, 2026-10-26). A dispatch of
 `e2e.yml` with `specs` runs the named specs; with `specs` empty, `e2e`
-runs the whole suite twice and fails if either pass fails: a flake is
-a failure, never retried away. Which specs run where, on `next` and on
+runs the whole suite twice and fails if either pass fails. A failed
+test is retried up to twice within a pass, and one that passes on a
+retry is flaky: named, filed and never blocking (2026-11-20, #693:
+was "a flake is a failure, never retried away"). Which specs run where, on `next` and on
 `staging`, is the #502 rule in "Promoting to staging and e2e" in
 `docs/cloud-lanes.md` (2026-11-01: the copy here moved there, #494).
 `e2e-burn-in-advisory` runs every spec changed since `staging` ten

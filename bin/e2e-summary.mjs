@@ -31,20 +31,30 @@ if (!report && process.env.RUN_OUTCOME === "success") {
   out.push("## E2E staging", "", "No report was written: the run");
   out.push("stopped before any spec finished. See the log.");
 } else {
-  // Spec file to { passed, failed, skipped } test counts
+  // Spec file to { passed, failed, skipped } test counts, and each test
+  // that passed only on a retry (#693), as `SPEC › TITLE` with its
+  // projects, so a flaky test is named, never hidden.
   const specs = new Map();
-  const walk = (suite, spec) => {
+  const flaky = new Map();
+  // A top-level suite is a file; each below it is a describe, whose
+  // title goes into the test's name as the list reporter prints it.
+  const walk = (suite, spec, titles = null) => {
     const here = suite.file ? `e2e/${suite.file.split("/").pop()}` : spec;
+    const path = titles ? [...titles, suite.title].filter(Boolean) : [];
     for (const s of suite.specs ?? []) {
       for (const t of s.tests ?? []) {
         const row = specs.get(here) ?? { passed: 0, failed: 0, skipped: 0 };
+        if (t.status === "flaky") {
+          const name = [here, ...path, s.title].join(" › ");
+          flaky.set(name, [...(flaky.get(name) ?? []), t.projectName]);
+        }
         if (t.status === "expected" || t.status === "flaky") row.passed++;
         else if (t.status === "skipped") row.skipped++;
         else row.failed++;
         specs.set(here, row);
       }
     }
-    for (const child of suite.suites ?? []) walk(child, here);
+    for (const child of suite.suites ?? []) walk(child, here, path);
   };
   for (const suite of report.suites ?? []) walk(suite, "");
 
@@ -66,6 +76,10 @@ if (!report && process.env.RUN_OUTCOME === "success") {
   );
   out.push("### Failed", "");
   out.push(...(failed.length ? failed.map((n) => `- ${n}`) : ["None."]), "");
+  out.push("### Flaky: passed on a retry, to file for a fix", "");
+  out.push(...(flaky.size
+    ? [...flaky].map(([n, p]) => `- \`${n}\` (${p.join(", ")})`)
+    : ["None."]), "");
   out.push("### Passed: lines for e2e/staging-passing.txt", "", "```");
   out.push(...passed.map((n) => `${n} ${sha.slice(0, 12)} ${date}`));
   out.push("```", "");

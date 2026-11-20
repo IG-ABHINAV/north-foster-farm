@@ -15,6 +15,9 @@ import {
   nff, teardown,
 } from "./support/staging.mjs";
 
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ retries: 0 });
+
 test.describe("orders API", () => {
   const made = [];
   const emails = [];

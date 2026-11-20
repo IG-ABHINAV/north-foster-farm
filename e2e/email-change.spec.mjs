@@ -18,7 +18,8 @@ const CHANGED = "The email address on your North Foster Farm account " +
   "was changed";
 const VERIFY = /\/api\/auth\/verify\?token=/;
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would reuse a single-use emailed link.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("changing your own email", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

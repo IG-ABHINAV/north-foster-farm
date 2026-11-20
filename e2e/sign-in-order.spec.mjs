@@ -18,6 +18,9 @@ import {
 } from "./support/staging.mjs";
 import { followLink } from "./support/request-error.mjs";
 
+// No retries (#693): a retry would reuse a single-use emailed link.
+test.describe.configure({ retries: 0 });
+
 const SIGN_IN = "Your secure sign-in link to North Foster Farm";
 const PROMPT = "Have an account? Don't forget to sign in.";
 const PERK = "Free delivery";

@@ -15,7 +15,8 @@ import {
 
 const CANCELED = "Your order is canceled";
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("the farm refunds and cancels", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

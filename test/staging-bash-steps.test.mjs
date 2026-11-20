@@ -96,7 +96,7 @@ describe("#648: e2e-staging.yml's Run and Alert are bash", () => {
       new RegExp(`Running ${specs.length} specs`));
     assert.deepEqual(bashRun.args("npx"), [
       "playwright", "test", "--project=desktop", "--project=phone",
-      "--retries=0", "--workers=2", "--trace=off", "--reporter=list,json",
+      "--retries=2", "--workers=2", "--trace=off", "--reporter=list,json",
       ...specs,
     ]);
 

@@ -136,6 +136,10 @@ jobs:
         with:
           browsers: chromium
 
+      # A failed test is tried twice more (James, 2026-11-20, #693): one
+      # stall or bot challenge in about 1,250 tests had failed whole
+      # runs. A pass on a retry is flaky, named in the closing list and
+      # the summary; specs that must not repeat set `retries: 0`.
       - name: Run
         id: run
         if: ${{ !cancelled() && env.SUPERSEDED != '1' && !inputs.sweep_only }}
@@ -160,7 +164,7 @@ jobs:
           fi
           printf 'Running %s specs\n' "${#specs[@]}"
           npx playwright test --project=desktop --project=phone \
-            --retries=0 --workers=2 --trace=off \
+            --retries=2 --workers=2 --trace=off \
             --reporter=list,json "${specs[@]}"
 
       # Each failure's screenshot, to see what the deploy served when a

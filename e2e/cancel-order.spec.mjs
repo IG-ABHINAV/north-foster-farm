@@ -12,6 +12,9 @@ import {
   orderRecord, teardown, waitForMail,
 } from "./support/staging.mjs";
 
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ retries: 0 });
+
 test.describe("a customer cancels a paid order", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);
 

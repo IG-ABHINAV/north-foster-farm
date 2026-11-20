@@ -30,7 +30,8 @@ const flip = (state) => nff(["maintenance", state]);
 const status = async () => /ON/.test(await nff(["maintenance", "status"]));
 
 test.describe("maintenance mode", () => {
-  test.describe.configure({ mode: "serial" });
+  // No retries (#693): a retry would pay a second time on staging.
+  test.describe.configure({ mode: "serial", retries: 0 });
   test.skip(!process.env.E2E_MAINTENANCE,
     "Flips staging's maintenance switch; set E2E_MAINTENANCE=1.");
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

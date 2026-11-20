@@ -20,7 +20,8 @@ import {
 } from "./support/staging.mjs";
 import { followLink } from "./support/request-error.mjs";
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay again and reuse a one-time link.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("customer emails, from their triggers", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

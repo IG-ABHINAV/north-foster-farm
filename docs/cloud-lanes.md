@@ -137,7 +137,8 @@ and pages, waits (one look every 3 minutes) and exits 0 on a pass. On
 a failure it exits 1 and prints the run's link and one line per
 failing test: file, line, name, the site page when the name carries
 one, and the Playwright projects it failed on. Nothing about passing
-tests. It exits 2 when it dispatched nothing, and 3 when it has no
+tests, except that each test that passed only on a retry gets a line
+calling it flaky, in a pass or a failure (2026-11-20, #693). It exits 2 when it dispatched nothing, and 3 when it has no
 verdict: GitHub failed to answer `LOOK_TRIES` looks in a row (a look
 that answers resets the count, and each retry prints one line), or
 the run was still going after 4 hours. Then it says so and prints the
@@ -321,6 +322,24 @@ here instead of restating it (2026-11-01, #494).
    commit. James approves each entry in the pull request that adds
    it. Promote prints every exemption it used with both runs, and
    logs the promotion as `promote.exemptions`.
+   Since 2026-11-20 (#693; until then retries were off everywhere),
+   a failed test is retried up to twice within the run, on staging
+   and in the local-build runs (`e2e.yml`, `e2e-run.yml`); the
+   burn-in and the soak keep retries off, since finding flakes is
+   their job. A test that passes on a retry is flaky: the run is
+   green, and it counts. **A flaky test never blocks a release**
+   (James, 2026-11-20). `bin/nff promote main` names each one, and
+   once `main` has moved files it in the open "Next release"
+   milestone, or comments on the open issue there whose title names
+   it, to be fixed right after the release. James may also ship a
+   commit whose full run has tests that failed every try: he lists
+   each under a line `## Failing tests shipped past` in the release
+   pull request's body, as ``- `SPEC › TITLE`: REASON``, and promote
+   ships only when every failure is listed with a reason, prints
+   each, and logs `promote.override`. The override needs the LGTM
+   label and the green checks as ever. Specs that must not run twice
+   (a payment, a one-time emailed link) set `retries: 0` themselves;
+   each says why at its `test.describe.configure`.
 8. **A push to `staging` or `main` re-checks nothing `next` already
    passed** (#580, 2026-11-14). `ci.yml` and `codeql.yml` start with a
    `proven` job (`proven-on-next.yml`) that asks GitHub for a
@@ -467,7 +486,9 @@ instead runs every spec not on `e2e/staging-passing.txt`, for a quick
 rerun of what failed while the fix is on its way. The run's summary
 lists the failed specs and the passed ones as `spec sha date` lines:
 paste those into `e2e/staging-passing.txt` on the next
-commit, so later runs take only what still fails. `e2e/staging-attention.txt`
+commit, so later runs take only what still fails. It also lists each
+test that passed only on a retry, as flaky (2026-11-20, #693).
+`e2e/staging-attention.txt`
 names the specs open work may break, and `bin/e2e-summary.mjs` writes the
 summary. It needs the Actions secrets `E2E_STAGING_TOKEN` and
 `E2E_STAGING_PING_URL`, and a failure alerts through the Healthchecks

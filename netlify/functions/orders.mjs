@@ -523,7 +523,10 @@ export const handle = async (req, {
       });
     }
   }
-  // A payment that certainly took no money gives the credit back.
+  // A payment that certainly took no money gives the credit back. No
+  // refund, so no refund id (#684): the whole of what was spent goes
+  // back, and a second run finds nothing held. A retry under the same
+  // order id spends again and must be able to give back again.
   const giveBack = async () => {
     if (!spent) return;
     await restoreCredit(stores, order.creditFrom, {

@@ -540,10 +540,12 @@ export const refundOrder = async (stores, id, {
     if (p.via === "credit") {
       // A member's credit (#471) goes back on the ledger it came
       // from, first (it is the newest payment), and the record says
-      // so. Nothing is asked of Square or PayPal.
+      // so. Nothing is asked of Square or PayPal. The refund's key
+      // names it on the ledger, so it goes back once (#684), even
+      // when an edit's refund is retried by its key.
       const { restored } = await restoreCredit(stores,
         order.creditFrom || order.customer.email,
-        { orderId: id, amount: take, now });
+        { orderId: id, amount: take, refundId: key, now });
 
       refund = { status: "COMPLETED", via: "credit", restored };
     } else if (paidByHand(p)) {

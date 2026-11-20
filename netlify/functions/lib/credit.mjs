@@ -167,18 +167,31 @@ export const spendCredit = (stores, email, {
   return { ...ledger, entries };
 });
 
+// The ledger's lines a refund put back, by the refund's id.
+const linesOf = (ledger, refundId) => ledger.entries
+  .flatMap((e) => (e.spent || []).filter((x) => x.refundId === refundId));
+
 // Puts credit back after a refund: onto the grants the order spent,
 // up to `amount`, whatever their expiry (the member lost nothing by
-// the refund). -> the ledger, and how much went back.
+// the refund). Each line it adds names `refundId`, and a refund the
+// ledger already names changes nothing (#684): a write the store kept
+// but answered with an error, read back after another writer's, would
+// otherwise put the same money back twice. Without a `refundId` it
+// restores every time, as a ledger from before #684 did; only a give
+// back of a whole hold, which a second run finds empty, omits it.
+// -> the ledger, and how much went back (for a refund restored
+// before, how much it put back then).
 export const restoreCredit = async (stores, email, {
-  orderId, amount, now = new Date(),
+  orderId, amount, refundId, now = new Date(),
 }) => {
   let restored = 0;
   const ledger = await swapLedger(stores, email, (stored) => {
     let left = amount;
     const at = now.toISOString();
+    const done = refundId ? linesOf(stored, refundId) : [];
 
-    restored = 0;
+    restored = -done.reduce((s, x) => s + x.amount, 0);
+    if (done.length) return null;
 
     const entries = stored.entries.map((e) => {
       const spent = [...(e.spent || [])];
@@ -193,7 +206,10 @@ export const restoreCredit = async (stores, email, {
 
       left -= give;
       restored += give;
-      spent.push({ orderId, amount: -give, at, refund: true });
+      spent.push({
+        orderId, amount: -give, at, refund: true,
+        ...(refundId ? { refundId } : {}),
+      });
 
       return { ...e, spent };
     });
@@ -276,6 +292,8 @@ export const sweepStrandedCredit = async (stores, {
       if (now.getTime() - Date.parse(at) < STRANDED_MS) continue;
       if (await getOrder(stores, orderId)) continue;
 
+      // No refund, so no refund id: the whole hold goes back, and a
+      // second run finds nothing held.
       const { restored } = await restoreCredit(stores, ledger.email, {
         orderId, amount: held, now,
       });

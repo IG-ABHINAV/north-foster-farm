@@ -6,7 +6,7 @@
      schedule skips (the farm isn't going), read from /api/events. An event without times
      lasts the day. A pop-up opens its card on the home page's map
      (M9 on #214), which carries its own link; any other event without
-     a link points at the map. Draft wording for James (#139). */}}
+     a link points at the map's Places layer (#places, #682). Draft wording for James (#139). */}}
 {{ $zone := "America/New_York" }}
 {{ $next := false }}
 {{ range sort (partial "lib/pickup-lists.html" .).events "date" }}
@@ -22,7 +22,7 @@
     {{ $starts := time.AsTime (printf "%sT%s:00" $next.date .) $zone }}
     {{ $hours = printf ", %s – %s" ($starts.Format "3:04 PM") ($next.ends.Format "3:04 PM") }}
   {{ end }}
-  {{ $href := .href | default (printf "%s#map" (relURL "")) }}
+  {{ $href := .href | default (printf "%s#places" (relURL "")) }}
   {{ $away := .href }}
   {{ if eq .kind "pop-up" }}
     {{ $href = printf "%s#place-%s" (relURL "") .slug }}

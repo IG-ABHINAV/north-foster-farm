@@ -39,17 +39,20 @@ const timed = (fn) => {
   return spent / calls;
 };
 
-// A call this long ends the climb: a quadratic rule reaches it within
-// a few doublings, long before a million, where it would take hours.
-const ENOUGH_MS = 250;
+// The CPU time a million characters may take. The linear rule takes
+// at most 15 ms on the Mac at load averages near 100, and about 1 ms
+// on CI; the old quadratic one passes it by about 16,000 characters
+// and would take many minutes on a million. A ratio of two sizes
+// failed instead on CI, where a call costs so little that cache
+// effects swamped it (#689).
+const BUDGET_MS = 100;
 
-// How much longer normalizing and validating `make(n)` takes when n
-// grows eightfold, measured at the largest n reached, doubling from
-// about 1,000 up to a million or until a run takes ENOUGH_MS. A
-// linear rule takes about 8 times as long and a quadratic one about
-// 64, whatever the load (#689).
-const growth = (make) => {
-  const runs = [];
+// The CPU time normalizing and validating `make(n)` takes, doubling n
+// from about 1,000 up to a million, or up to the first n over
+// BUDGET_MS, so a quadratic rule stops long before it takes hours.
+// -> the last n timed and its time.
+const climb = (make) => {
+  let run;
 
   for (let k = 10; k >= 0; k -= 1) {
     const n = Math.round(MILLION / 2 ** k);
@@ -59,16 +62,11 @@ const growth = (make) => {
       looksLikeEmail(value);
     });
 
-    runs.push({ n, ms });
-    if (ms >= ENOUGH_MS) break;
+    run = { n, ms };
+    if (ms > BUDGET_MS) break;
   }
 
-  const last = runs.at(-1);
-  const first = runs.at(-4) || runs[0];
-  const note = `${first.n}: ${first.ms.toFixed(2)} ms, `
-    + `${last.n}: ${last.ms.toFixed(2)} ms`;
-
-  return { ratio: runs.length < 4 ? Infinity : last.ms / first.ms, note };
+  return run;
 };
 
 describe("normalizing in linear time", () => {
@@ -78,15 +76,18 @@ describe("normalizing in linear time", () => {
     ["spaces and periods, then x", (n) => `${". ".repeat(n)}x`],
     ["spaces at the end", (n) => `a@b.com${" ".repeat(n)}`],
   ]) {
-    it(`takes time in proportion to ${name}`, (t) => {
-      // Warms the rule up, so the first sizes time compiled code.
-      growth((n) => make(Math.min(n, 1_000)));
+    it(`normalizes and validates a million ${name} within budget`,
+      (t) => {
+        // Warms the rule up, so the climb times compiled code.
+        climb((n) => make(Math.min(n, 1_000)));
 
-      const { ratio, note } = growth(make);
+        const { n, ms } = climb(make);
+        const note = `${n} characters: ${ms.toFixed(2)} ms of CPU time`;
 
-      t.diagnostic(`${ratio.toFixed(1)}x, ${note}`);
-      assert.ok(ratio < 24, `${ratio.toFixed(1)} times as long, ${note}`);
-    });
+        t.diagnostic(note);
+        assert.ok(n === MILLION && ms <= BUDGET_MS,
+          `${note}, against ${BUDGET_MS} ms for a million`);
+      });
   }
 });
 

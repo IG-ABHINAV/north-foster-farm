@@ -1,8 +1,14 @@
 // The thin bar above the header that names the next pop-up (#139),
 // from data/series.json. The build picks the event; the page drops a
 // bar whose end has passed. docs/qa-launch.md, "The autumn refresh".
+//
+// Against staging, "every page carries it" waits PACE_MS
+// (support/pace.mjs) between its page loads, as overflow.spec's walks
+// do (#655): at full speed Netlify's bot challenge answered one of
+// them (#687). A local build makes no wait.
 
 import seriesData from "../data/series.json" with { type: "json" };
+import { pace } from "./support/pace.mjs";
 import { events } from "./support/series.mjs";
 import { expect, test } from "./support/order.mjs";
 
@@ -141,9 +147,12 @@ test.describe("top bar (#139)", () => {
     }
   });
 
-  test("every page carries it", async ({ page }) => {
-    for (const path of ["/order/", "/about/", "/contact/", "/news/",
-      "/delivery-policy/", "/login/"]) {
+  test("every page carries it", async ({ page, baseURL }) => {
+    const paths = ["/order/", "/about/", "/contact/", "/news/",
+      "/delivery-policy/", "/login/"];
+
+    for (const [i, path] of paths.entries()) {
+      if (i) await pace(baseURL);
       await page.goto(path);
       await expect(bar(page), path).toBeVisible();
     }

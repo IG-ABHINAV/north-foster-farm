@@ -44,6 +44,7 @@ import {
 } from "./schedule-env.mjs";
 import { shipLog } from "./ship-log.mjs";
 import { USAGE as E2E_USAGE, e2eCommand } from "./e2e/dispatch.mjs";
+import { handOff, reportRunFor } from "./e2e/report-run.mjs";
 import {
   USAGE as HOTFIX_USAGE, flagRefusal as hotfixFlagRefusal, hotfixCommand,
 } from "./hotfix.mjs";
@@ -558,6 +559,18 @@ if (process.argv[2] === "completion") {
       contexts: [...Object.keys(CONTEXTS), "development"],
     }), () => { resolve(); process.exit(0); });
   });
+}
+
+// `bin/nff e2e` on James's Mac hands itself to ~/.bin/report_run, which
+// records the run for his status line and runs this file again (#647).
+// Before anything loads or prints, so the output is the child's alone.
+const reportRun = reportRunFor(process.argv.slice(2), process.env);
+
+if (reportRun) {
+  const status = handOff(reportRun, fileURLToPath(import.meta.url),
+    process.argv.slice(2), process.env);
+
+  if (status !== null) process.exit(status);
 }
 
 loadEnv(join(root, context ? ENV_FILES[context] : ".env"));

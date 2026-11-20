@@ -150,7 +150,15 @@ nothing, and any flag but `--all`, `--dry-run`, `--base` and `--help`
 is refused with the usage and exit 2, `bin/nff`'s global ones
 (`--staging`, `--no-email`) included: the run is GitHub's, against a
 branch, and sends no email (2026-11-19, #630: `--help` and typos such
-as `--dryrun` fell through to the changed-path choice and dispatched). Specs (`e2e/...`) or pages (`/...`) named on the
+as `--dryrun` fell through to the changed-path choice and dispatched).
+On James's Mac a run, though not a dry run or help, is recorded for
+his status line: when `~/.bin/report_run` is there and executable,
+`bin/nff e2e` hands itself to it as `report_run e2e -- ...` before it
+prints anything, so the output and exit status are unchanged. An npm
+script named `e2e` or `test:e2e`, which report_run records already,
+is not recorded twice (2026-11-20, #647; `bin/e2e/report-run.mjs`).
+A bare `report_run e2e -- bin/nff e2e` typed by hand records twice:
+report_run sets nothing a child could see. Specs (`e2e/...`) or pages (`/...`) named on the
 command line skip the table, and `--all` takes every spec the table
 names, still as named specs. It never sends an empty `specs`, which
 would be the full suite, nor pages without a spec. It sends pages only

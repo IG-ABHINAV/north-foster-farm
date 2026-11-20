@@ -32,7 +32,8 @@ import {
 import { GUIDE, RUNBOOK_ALERTS } from "./alerts-guide.mjs";
 import { company } from "./company.mjs";
 import {
-  between, methodName, packetCounts, pickupWindow, placeOf, streetAddress,
+  between, methodName, packetCounts, packingGroup, pickupWindow, placeOf,
+  shortDay, streetAddress,
 } from "./describe.mjs";
 import { now as clock } from "./clock.mjs";
 import {
@@ -2224,11 +2225,11 @@ export const farmTomorrow = (orders, { date, links } = {}) => {
   };
 };
 
-// The packing slips (#292, lib/packing.mjs), 6:00 daily, always: the
-// PDF is attached, and the email lists what is in it. Wording is a
-// draft.
+// The packing slips (#292, #694, lib/packing.mjs), at 3 PM the day
+// before and 6 AM the day itself, one email per group: the PDF is
+// attached, and the email lists what is in it. Wording is a draft.
 const PACKET_KIND = {
-  new: "new", weekly: "reprint", changed: "**revised**",
+  new: "new", reprint: "reprint", changed: "**revised**",
   cancelled: "**CANCELED**",
 };
 
@@ -2277,63 +2278,48 @@ const packetLine = (e) => {
   return `**${e.order.id}**${who ? `, ${who}` : ""}: ${PACKET_KIND[e.kind]}`;
 };
 
-// The day before's packet (#515) passes `eve`, the time it goes ("3
-// PM") and `next`, the morning packet's ("6 AM"): `day` is the day its
-// slips are for. The morning after one passes its time as `since`.
+// One group's packing slips (#694): `place` names the group, `day` the
+// day its slips are for, and the subject reads "North Scituate drop
+// site packing slips for Saturday 11/21" (James's examples are his
+// words). The 3 PM packet the day before passes `next`, the morning
+// packet's time ("6 AM"); the morning's late slips pass `late` and
+// `since`, the 3 PM packet's time, and their subject opens "Late: "
+// (a draft); a morning with no 3 PM packet before it passes neither.
+// `place` defaults to the first entry's group. `quiet`, or no entries,
+// is the 3 PM email for a day with nothing at all to print, so silence
+// never stands for a failure. Wording is a draft.
 export const farmPackingSlips = (entries, {
-  day, sunday = false, quiet = false, slips = 0, revised = 0,
-  cancelled = 0, filename = "", links, eve = null, next = null,
-  since = null,
+  day, place = null, late = false, quiet = false, slips = 0, revised = 0,
+  cancelled = 0, filename = "", links, next = null, since = null,
 } = {}) => {
   const when = label(day);
 
-  if (quiet) {
-    const title = eve
-      ? `Packing slips for tomorrow, ${when}: nothing due`
-      : `Packing slips, ${when}: ${since
-        ? `nothing changed since ${since}` : "nothing to print"}`;
-    let body = "No order has come in, changed, or been canceled since " +
-      "the last packet.";
-
-    if (eve) {
-      body = `No order is due ${when}. The ${next} email brings ` +
-        "any that come in after this one.";
-    } else if (since) {
-      body = "No order has come in, changed, or been canceled since " +
-        `yesterday's ${since} packet. Pack from that one.`;
-    }
+  if (quiet || !entries.length) {
+    const title = `No packing slips for ${shortDay(day)}`;
 
     return {
       subject: title,
-      ...render(title, [p(body), adminFooter(links)], links,
-        { tag: "Packing slips" }),
+      ...render(title, [
+        p(`No order is due ${when}. The ${next || "6 AM"} email brings ` +
+          "any that come in after this one."),
+        adminFooter(links),
+      ], links, { tag: "Packing slips" }),
     };
   }
 
-  const counts = packetCounts({ slips, revised, cancelled });
-  let title = `Packing slips, ${when}: ${counts}`;
+  const where = place || packingGroup(entries[0].order.fulfilment).place;
+  const title = `${late ? "Late: " : ""}${where} packing slips for ${
+    shortDay(day)}`;
+  let scope = p(`It has every slip in this group for today, ${when}. ` +
+    "Yesterday's 3 PM slips didn't go, so there are no others.");
 
-  if (eve) title = `Packing slips for tomorrow, ${when}: ${counts}`;
-  else if (sunday) title = `Packing slips for the week of ${when}: ${counts}`;
-
-  const after = since ? `yesterday's ${since} packet` : "yesterday";
-  let scope = null;
-
-  if (eve) {
-    scope = p(`It has a slip for every order due ${when}, as well as ` +
-      "anything new, changed, or canceled for later days, and replaces " +
-      `every earlier slip for ${when}. The ${next} email brings ` +
-      "only what comes in, changes, or is canceled after this one.");
-  } else if (sunday) {
-    scope = p(`It's Sunday, so it has a slip for every order due ${
-      since ? `from ${label(addDays(day, 1))} to ` : "by "}${
-      label(addDays(day, 6))}, as well as anything new, changed, or ` +
-      `canceled since ${after}, and replaces every earlier slip for ${
-        since ? "those days" : "this week"}.`);
-  } else if (since) {
-    scope = p(`Yesterday's ${since} packet had a slip for every order ` +
-      "due today. This one has only what came in, changed, or was " +
-      "canceled since then.");
+  if (late) {
+    scope = p(`These came in, changed, or were canceled after yesterday's ${
+      since || "3 PM"} slips for today, ${when}. Pack the rest from those.`);
+  } else if (next) {
+    scope = p(`It has every slip in this group for ${when}, and replaces ` +
+      `any slip printed for those orders earlier. The ${next} email brings ` +
+      "any that come in, change, or are canceled after this one.");
   }
 
   return {
@@ -2348,6 +2334,7 @@ export const farmPackingSlips = (entries, {
           "sheet and no slip.")
         : null,
       heading("In this packet"),
+      p(packetCounts({ slips, revised, cancelled })),
       ...packetGroups(entries).flatMap((g) => [
         p(`**${g.title}**`), list(g.entries.map(packetLine)),
       ]),

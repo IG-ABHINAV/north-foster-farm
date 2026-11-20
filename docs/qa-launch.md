@@ -2922,14 +2922,20 @@ Manual.
 - **Setup:** Paid orders at the drop site and at a market on the same
   day; one more on-farm and one delivery.
 - **Test:**
-  1. Run the 6:00 packing slips (`bin/nff --staging jobs run`, or the
-     toolbar's "As 6:00") and read the PDF.
+  1. Run the 15:00 packing slips the day before (`bin/nff --staging
+     jobs run` from 15:00) and read each group's email and PDF: one
+     each for the drop site, the market, on-farm pickup and delivery
+     (#694, 2026-11-20; this step ran the 6:00 packet, which now holds
+     only late slips).
   2. The 6 PM "Tomorrow" report the day before.
   3. Open each order in the Square sandbox dashboard.
 - **Assert:** Slips: Type is the series' name ("Drop site",
   "Foster Farmers’ Market"), never "Scheduled pickup"; Place is the
-  address; the Window is the occurrence's; orders of one occurrence
-  sit together. The report: after Deliveries, one heading per
+  address; the Window is the occurrence's; each occurrence has its
+  own email and PDF, its subject "<town> <series name> packing slips
+  for <Weekday> <M/D>", the town left out when the name holds it
+  ("North Scituate drop site", "Foster Farmers’ Market"). The report:
+  after Deliveries, one heading per
   occurrence, "<series name>, <day>, <place>, <hours> (n)", earliest
   hours first, then On-farm pickups. Square: the pickup note reads
   "Pickup at <name>, <address> · ..." and the pickup time is the

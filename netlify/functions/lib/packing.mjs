@@ -1,13 +1,27 @@
-// The daily packing slips (#292): one email to the farm at 6:00 AM
-// ET with one PDF holding every sheet to print that morning.
+// The packing slips, just in time (#694, 2026-11-20; it replaced the
+// 6:00 AM packet of #292 with its Sunday week, and #515's 3 PM packet
+// with later days' slips in it). A day's slips go to the farm twice,
+// one email per fulfillment group, each with its own PDF holding only
+// that group's pick list and sheets:
 //
-//   Sunday       a clean slip for every order fulfilled Sunday to
-//                Saturday, plus the daily set for later weeks
-//   other days   a slip for each order not printed yet, a revision
-//                sheet and a fresh slip for each one changed since it
-//                was printed, a CANCELED sheet for each printed one
-//                since cancelled
-//   quiet day    the email still goes, saying there is nothing to print
+//   3:00 PM the day before   every slip for that day, and only that
+//                            day: a new one, a revised one, a reprint
+//                            of one printed earlier and unchanged, a
+//                            CANCELED sheet for one printed and since
+//                            cancelled. A day with nothing to print
+//                            gets one "No packing slips" email instead
+//   6:00 AM the day itself   what came in, changed or was cancelled
+//                            after the 3 PM packet, subject marked
+//                            "Late"; nothing when nothing is late. If
+//                            the 3 PM packet never went, the day's
+//                            whole set, unmarked
+//
+// A group is each pickup-day occurrence (the drop site, each market,
+// each pop-up), on-farm pickup, or delivery, named the farm's way in
+// the subject: "North Scituate drop site packing slips for Saturday
+// 11/21" (`packingGroup` and `shortDay` in describe.mjs). An order
+// moved off the day after its slip was printed goes, with its
+// revision sheet, to the group its old slip is in.
 //
 // What was printed is kept per order in the jobs store,
 // `packing/printed/<id>`: a snapshot of what its slip showed. A
@@ -15,26 +29,19 @@
 // from timestamps, so a change by any path is caught. Contact
 // details, the address and the customer's notes are kept only as a
 // hash: the snapshot says that they changed, the fresh slip says what
-// they are now. `packing/sent/<day>` marks the day's packet as sent.
+// they are now. `packing/eve/<day>` (the day the slips are for) marks
+// the 3 PM packet sent, and its `cutoff`, the time of the run that
+// fixed it, is where the 6 AM packet's late orders begin.
+// `packing/sent/<day>` marks the 6 AM packet sent; both keep the
+// places of the groups mailed as `groups`.
 //
-// After the packet, an order due that day that changes anyway (the
-// farm's CLI, a refund from Square or PayPal) is mailed at once as
-// "Changed after printing", from the next 15-minute run.
+// After the 6 AM packet, an order due that day that changes anyway
+// (the farm's CLI, a refund from Square or PayPal) is mailed at once
+// as "Changed after printing", from the next 15-minute run.
 //
-// At 3:00 PM the day before (#515), a second packet has every slip for
-// the next day: a new one, a revised one, a reprint of one printed
-// earlier and unchanged, a CANCELED sheet for one printed and since
-// cancelled. It also has what the morning packet would for later days:
-// each new, changed or cancelled order. It records its slips printed
-// like the morning packet, so the next morning carries only what came
-// in or changed after it: the cutoff, kept as `cutoff` in
-// `packing/eve/<day>` (the day the slips are for), is the time of the
-// run that fixed it. The morning after it reprints none of that day's
-// slips for the week, nor says the day is quiet without naming the 3
-// PM packet.
-//
-// Each run that sends pings HEALTHCHECKS_PACKING_URL (production
-// only), or its /fail when the packet could not be built or sent.
+// The 6 AM run pings HEALTHCHECKS_PACKING_URL (production only) once,
+// late slips or none; either run pings its /fail when any group's
+// email could not be built or sent.
 
 import { createHash } from "node:crypto";
 
@@ -43,11 +50,13 @@ import signatures from "../../../data/signatures.json" with { type: "json" };
 import { pickupTimes } from "../../../assets/scripts/order/lib/schedule.mjs";
 import { dollars } from "../../../assets/scripts/order/lib/totals.mjs";
 import {
-  addDays, label, parts, today, weekday,
+  addDays, label, parts, today,
 } from "../../../assets/scripts/order/lib/zoned.mjs";
 import { METHODS } from "./checkout.mjs";
 import { company } from "./company.mjs";
-import { methodName, packetCounts, placeOf } from "./describe.mjs";
+import {
+  methodName, packetCounts, packingGroup, placeOf, shortDay,
+} from "./describe.mjs";
 import { isScheduled } from "../../../assets/scripts/order/lib/dates.mjs";
 import { ping } from "./health.mjs";
 import { now as clock } from "./clock.mjs";
@@ -63,7 +72,9 @@ import {
 import { resendAllowed } from "./resend-guard.mjs";
 import { mailLinks } from "./site.mjs";
 import { mark, wordmark } from "./slip-assets.mjs";
-import { farmChangedAfterPrint, farmPackingSlips } from "./templates.mjs";
+import {
+  farmChangedAfterPrint, farmPackingSlips,
+} from "./templates.mjs";
 
 const tz = terms.timeZone;
 
@@ -281,19 +292,14 @@ export const readPrinted = async (stores) => {
 // --- Choosing the sheets -----------------------------------------------
 //
 // An entry is { order, kind, changes }: kind "new" (a slip), "changed"
-// (a revision sheet, then a slip), "weekly" (a slip on Sunday for an
-// order already printed and unchanged) or "cancelled" (a sheet, no
-// slip). `order` for a cancelled entry is the record as it stands, or
-// the snapshot when the record is gone. `reprint(date)` says which
-// printed, unchanged orders get a "weekly" slip again: by default, on
-// Sunday, the week's.
+// (a revision sheet, then a slip), "reprint" (a slip again for an order
+// already printed and unchanged) or "cancelled" (a sheet, no slip).
+// `order` for a cancelled entry is the record as it stands, or the
+// snapshot when the record is gone. `reprint(date)` says which
+// printed, unchanged orders get their slip again: none by default
+// (#694 ended Sunday's reprint of the week).
 
-export const isSunday = (day) => weekday(day) === 0;
-
-export const choose = ({ open, printed, gone, day, reprint }) => {
-  const sunday = isSunday(day);
-  const weekEnd = addDays(day, 6);
-  const again = reprint || ((date) => sunday && date <= weekEnd);
+export const choose = ({ open, printed, gone, day, reprint = () => false }) => {
   const entries = [];
 
   for (const order of open) {
@@ -310,8 +316,8 @@ export const choose = ({ open, printed, gone, day, reprint }) => {
       entries.push({
         order, kind: "changed", changes: changesBetween(was.snapshot, now),
       });
-    } else if (again(date)) {
-      entries.push({ order, kind: "weekly", changes: [] });
+    } else if (reprint(date)) {
+      entries.push({ order, kind: "reprint", changes: [] });
     }
   }
   for (const { record, order } of gone) {
@@ -321,23 +327,44 @@ export const choose = ({ open, printed, gone, day, reprint }) => {
   return entries.sort(byFulfillment);
 };
 
-// The 3 PM packet for `day` (#515): every slip for that day, a printed
-// and unchanged one as a reprint, and each new, changed or cancelled
-// entry for a later day, as the morning packet has them. It leaves
-// nothing pending, so the next morning carries only what came after it.
-export const chooseEve = ({ open, printed, gone, day }) => choose({
-  open, printed, gone, day, reprint: (date) => date === day,
-});
+// The sheets for `day` alone (#694): each order due that day, and each
+// whose printed slip was for that day though it has moved since, so
+// the farm hears of the move where the old slip sits. `reprint` gives
+// a printed and unchanged order its slip again, as the 3 PM packet's
+// whole set for the day does; the 6 AM packet's late slips leave it
+// out.
+export const chooseDay = ({ open, printed, gone, day, reprint = false }) =>
+  choose({ open, printed, gone, day, reprint: () => reprint })
+    .filter((e) => e.order.fulfilment.date === day
+      || (e.kind !== "reprint"
+        && (printed.get(e.order.id) || {}).date === day));
 
-// The morning's choice once the 3 PM packet had the day's slips: on
-// Sunday the rest of the week is reprinted, never the day itself.
-export const chooseAfterEve = ({ open, printed, gone, day }) => {
-  const weekEnd = addDays(day, 6);
+// The group an entry's sheets go in: its order's, or, for one moved off
+// `day`, the group its printed slip was in.
+const groupOfEntry = (e, printed, day) => {
+  const was = printed.get(e.order.id);
 
-  return choose({
-    open, printed, gone, day,
-    reprint: (date) => isSunday(day) && date > day && date <= weekEnd,
-  });
+  return packingGroup(e.order.fulfilment.date !== day && was
+    ? {
+      method: was.snapshot.method, date: was.date,
+      ...was.snapshot.occurrence && { occurrence: was.snapshot.occurrence },
+    }
+    : e.order.fulfilment);
+};
+
+// The entries by packing group, in the order the slips stack.
+// -> [{ key, place, entries }].
+export const groupsOf = (entries, printed, day) => {
+  const groups = new Map();
+
+  for (const e of entries) {
+    const g = groupOfEntry(e, printed, day);
+
+    if (!groups.has(g.key)) groups.set(g.key, { ...g, entries: [] });
+    groups.get(g.key).entries.push(e);
+  }
+
+  return [...groups.values()];
 };
 
 const startOf = (order) => {
@@ -465,9 +492,13 @@ const sheet = (doc, { title, id, now }) => {
     doc.text(FARM_COPY, CENTER, 59, {
       size: 14, bold: true, color: 1, align: "center",
     });
-    doc.text(`${title}${n > 1 ? " (continued)" : ""}`, M, 110, {
-      size: 18, bold: true,
-    });
+    const heading = `${title}${n > 1 ? " (continued)" : ""}`;
+    // A long place name shrinks to fit beside the order number.
+    const room = RIGHT - M - (id ? 150 : 0);
+    const size = Math.min(18,
+      18 * room / widthOf(heading, { size: 18, bold: true }));
+
+    doc.text(heading, M, 110, { size, bold: true });
     if (id) doc.text(id, RIGHT, 110, { size: 18, bold: true, align: "right" });
     doc.text(`Printed ${stamp(now)}`, M, BOTTOM + 24, { size: 8, shade: 0.4 });
     doc.text(FARM_COPY, RIGHT, BOTTOM + 24, {
@@ -865,14 +896,16 @@ const revisionPage = (doc, entry, now) => {
 };
 
 const KIND = {
-  new: "New", changed: "Revised", weekly: "Reprint", cancelled: "CANCELED",
+  new: "New", changed: "Revised", reprint: "Reprint", cancelled: "CANCELED",
 };
 
-const coverPage = (doc, { entries, now, title }) => {
+const coverPage = (doc, { entries, now, title, day }) => {
   const at = sheet(doc, { title, now });
   const picks = pickList(entries);
+  const counts = packetCounts(countsOf(entries));
 
-  doc.text(packetCounts(countsOf(entries)), M, at.y, { size: 11 });
+  doc.text(day ? `Packing slips for ${label(day)}: ${counts}` : counts,
+    M, at.y, { size: 11 });
   at.y += LINE + 12;
 
   doc.text("Contents", M, at.y, { size: 14, bold: true });
@@ -934,23 +967,23 @@ const coverPage = (doc, { entries, now, title }) => {
     methods.forEach((row, i) => doc.text(row, COLS.method, at.y + i * 12, {
       size: 10,
     }));
-    doc.text(f.date ? label(f.date) : "", COLS.date, at.y, { size: 10 });
+    doc.text(f.date ? shortDay(f.date) : "", COLS.date, at.y, { size: 10 });
     doc.text(KIND[e.kind], COLS.status, at.y, { size: 10,
-      bold: e.kind !== "new" && e.kind !== "weekly" });
+      bold: e.kind !== "new" && e.kind !== "reprint" });
     at.y += (rows - 1) * 12 + LINE;
   }
 };
 
 // The whole packet: the cover (unless `cover` is false; "only" is the
-// cover alone), then for each entry its revision sheet and slip as it
-// needs. `env` says which ways
-// to pay an unpaid slip lists. -> a Buffer.
+// cover alone) under `title`, its counts naming `day` when given, then
+// for each entry its revision sheet and slip as it needs. `env` says
+// which ways to pay an unpaid slip lists. -> a Buffer.
 export const packetPdf = ({
-  entries, now, title, cover = true, env = process.env,
+  entries, now, title, day = null, cover = true, env = process.env,
 }) => {
   const doc = pdf({ title });
 
-  if (cover) coverPage(doc, { entries, now, title });
+  if (cover) coverPage(doc, { entries, now, title, day });
   for (const e of cover === "only" ? [] : entries) {
     if (e.kind === "changed" || e.kind === "cancelled") {
       revisionPage(doc, e, now);
@@ -961,12 +994,23 @@ export const packetPdf = ({
   return doc.bytes();
 };
 
-export const packetTitle = (day) => (isSunday(day)
-  ? `Packing slips for the week of ${label(day)}`
-  : `Packing slips, ${label(day)}`);
+// A packet's cover title: its group's place, marked when late; or, for
+// a whole day's preview, the day.
+export const packetTitle = (day, { place = null, late = false } = {}) =>
+  (place ? `${late ? "Late: " : ""}${place}`
+    : `Packing slips for ${shortDay(day)}`);
 
 export const fileName = (day, suffix = "") =>
   `packing-slips-${day}${suffix}.pdf`;
+
+// "north-scituate-drop-site": a place in a file's name.
+export const slugOf = (place) => place.toLowerCase()
+  .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+// A group's PDF: "packing-slips-2026-11-21-north-scituate-drop-site.pdf",
+// "-late" before ".pdf" at 6 AM.
+export const groupFileName = (day, place, late = false) =>
+  fileName(day, `-${slugOf(place)}${late ? "-late" : ""}`);
 
 export const attachment = (filename, bytes) => ({
   filename, contentType: "application/pdf",
@@ -1077,15 +1121,19 @@ export const missingPingKey = (env) => sendsForReal(env) && !env[PING_KEY];
 
 // --- Sending a packet ---------------------------------------------------
 
-// One packet, the morning's or the 3 PM one, to the farm.
+// One packet, the 3 PM one or the morning's, to the farm: one email per
+// group, each with its own PDF. With no group at all, `quiet` sends
+// the one email saying so (the 3 PM packet); the morning sends none.
 //
 // The first try fixes the packet in `pendingKey`: its time and each
 // order with what its sheet shows. A retry sends the same orders with
-// the same time, so a send whose answer was lost is not sent twice:
-// Resend answers the same key with the first send. If an order changed
-// in between, the body differs and Resend refuses the key; the first
-// send went out, so the packet counts as sent, as the pending record
-// printed it, and the change is caught later.
+// the same time, so a group whose send was answered, or whose answer
+// was lost, is not sent twice: Resend answers the same key with the
+// first send. If an order changed in between, the body differs and
+// Resend refuses the key; the first send went out, so that group
+// counts as sent, as the pending record printed it, and the change is
+// caught later. Every group is tried; if any fails, nothing is
+// recorded printed and the run throws, so the next one tries again.
 //
 // The fixed time is the packet's cutoff, kept by `sentKey` as `cutoff`:
 // the run's `now`, taken when the 15-minute run starts, a little before
@@ -1095,8 +1143,8 @@ export const missingPingKey = (env) => sendsForReal(env) && !env[PING_KEY];
 // next packet's. -> the summary.
 const sendPacket = async (stores, {
   day, to, mail, env, now, pending: fixed, pendingKey, sentKey,
-  idempotencyKey, event, entries: chosen, summary: extra, filename, title,
-  mailOf,
+  idempotencyKey, event, entries: chosen, printed, late = false, next = null,
+  since = null, quiet = false,
 }) => {
   let entries = chosen;
   let pending = fixed;
@@ -1114,26 +1162,55 @@ const sendPacket = async (stores, {
   }
 
   const stamp = new Date(pending.at);
-  const summary = {
-    day, ...extra, quiet: !entries.length, ...countsOf(entries),
-  };
-  let records = entries.map(printedOf);
+  const groups = groupsOf(entries, printed, day);
+  const links = mailLinks(env);
+  const records = [];
+  const failed = [];
+  const send = async (message, ids) => {
+    try {
+      await mail({ to, ...message }, { env });
+      records.push(...entries.filter((e) => ids.includes(e.order.id))
+        .map(printedOf));
+    } catch (error) {
+      if (!alreadySent(error)) {
+        failed.push(error);
 
-  try {
-    await mail({
-      to, idempotencyKey,
-      ...mailOf(entries, summary, filename),
-      attachments: summary.quiet ? [] : [attachment(filename, packetPdf({
-        entries, now: stamp, title, env,
+        return;
+      }
+      log.warn({ event, day });
+      records.push(...pending.entries.filter((r) => ids.includes(r.id))
+        .map((r) => ({ id: r.id, date: r.date, snapshot: r.snapshot })));
+    }
+  };
+
+  for (const g of groups) {
+    const filename = groupFileName(day, g.place, late);
+
+    await send({
+      idempotencyKey: `${idempotencyKey}-${g.key}`,
+      ...farmPackingSlips(g.entries, {
+        day, place: g.place, late, next, since, filename, links,
+        ...countsOf(g.entries),
+      }),
+      attachments: [attachment(filename, packetPdf({
+        entries: g.entries, now: stamp, day, env,
+        title: packetTitle(day, { place: g.place, late }),
       }))],
-    }, { env });
-  } catch (error) {
-    if (!alreadySent(error)) throw error;
-    log.warn({ event, day });
-    records = pending.entries.map((r) => ({
-      id: r.id, date: r.date, snapshot: r.snapshot,
-    }));
+    }, g.entries.map((e) => e.order.id));
   }
+  if (!groups.length && quiet) {
+    await send({
+      idempotencyKey, attachments: [],
+      ...farmPackingSlips([], { day, quiet: true, next, links }),
+    }, []);
+  }
+  if (failed.length) throw failed[0];
+
+  const summary = {
+    day, late, quiet: !groups.length, ...countsOf(entries),
+    groups: groups.map((g) => g.place),
+  };
+
   await remember(stores, records, stamp);
   await stores.jobs.set(sentKey, {
     at: now.toISOString(), cutoff: pending.at, ...summary,
@@ -1146,13 +1223,16 @@ const sendPacket = async (stores, {
 
 // --- The morning run ----------------------------------------------------
 
-// From PACKING_HOUR, once a day: the packet, or the quiet-day email.
-// After a 3 PM packet for the day, only what came in or changed since
-// it, and the quiet-day email says so.
+// From PACKING_HOUR, once a day: one email per group with the day's
+// late slips, what came in, changed or was cancelled after the 3 PM
+// packet; nothing when none is late. Without a 3 PM packet for the
+// day, the day's whole set, unmarked. Either way the day is marked
+// sent, so "Changed after printing" starts.
 //
-// -> { day, sunday, quiet, slips, revised, cancelled } or null when
-// nothing was done this run. Throws when the packet could not go (the
-// next run tries again) or went without its check configured.
+// -> { day, late, quiet, slips, revised, cancelled, groups } or null
+// when nothing was done this run. Throws when a group's email could
+// not go (the next run tries again) or went without its check
+// configured.
 export const packingDaily = async (stores, {
   env = process.env, mail = sendMail, now = clock(),
   fetchImpl = globalThis.fetch,
@@ -1172,22 +1252,15 @@ export const packingDaily = async (stores, {
   let result;
 
   try {
-    // The 3 PM packet had the day's slips (#515): this one has what
-    // came after it.
-    const eve = await stores.jobs.get(`${EVE}${day}`);
-    const pick = eve ? chooseAfterEve : choose;
+    const eve = !!(await stores.jobs.get(`${EVE}${day}`));
+    const found = await gather(stores, day);
 
     result = await sendPacket(stores, {
       day, to, mail, env, now, pending, pendingKey,
       sentKey: `${SENT}${day}`, idempotencyKey: `packing-${day}`,
-      event: "packing.already_sent",
-      entries: pick({ ...(await gather(stores, day)), day }),
-      summary: { sunday: isSunday(day) },
-      filename: fileName(day), title: packetTitle(day),
-      mailOf: (entries, summary, filename) => farmPackingSlips(entries, {
-        ...summary, filename, links: mailLinks(env),
-        ...eve && { since: EVE_TIME },
-      }),
+      event: "packing.already_sent", printed: found.printed,
+      entries: chooseDay({ ...found, day, reprint: !eve }),
+      late: eve, since: eve ? EVE_TIME : null,
     });
     await prune(stores, day);
   } catch (error) {
@@ -1214,17 +1287,16 @@ export const packingDaily = async (stores, {
 
 // --- The 3 PM run -------------------------------------------------------
 
-export const eveTitle = (day) => `Full packing slips, ${label(day)}`;
-
-// From EVE_HOUR, once a day: every slip for tomorrow (#515), so the
-// farm can pack the night before, with what is new, changed or
-// cancelled for later days, or the email saying none is due. A failure
+// From EVE_HOUR, once a day: one email per group with every slip for
+// tomorrow and nothing for a later day (#694), so the farm can pack
+// the night before, or the one email saying none is due. A failure
 // pings the packing check's /fail; a success leaves the check to the
 // morning's packet, which its schedule expects, so after a 3 PM
 // failure the check stays down until the morning's packet goes, even
 // if a retry sent the 3 PM one.
-// -> { day, quiet, slips, revised, cancelled } or null when nothing
-// was done this run. Throws when the packet could not go.
+// -> { day, late, quiet, slips, revised, cancelled, groups } or null
+// when nothing was done this run. Throws when a group's email could
+// not go.
 export const packingEve = async (stores, {
   env = process.env, mail = sendMail, now = clock(),
   fetchImpl = globalThis.fetch,
@@ -1244,16 +1316,14 @@ export const packingEve = async (stores, {
   let result;
 
   try {
+    const found = await gather(stores, day);
+
     result = await sendPacket(stores, {
       day, to, mail, env, now, pending, pendingKey,
       sentKey: `${EVE}${day}`, idempotencyKey: `packing-eve-${day}`,
-      event: "packing.eve.already_sent",
-      entries: chooseEve({ ...(await gather(stores, day)), day }),
-      summary: {}, filename: fileName(day, "-full"), title: eveTitle(day),
-      mailOf: (entries, summary, filename) => farmPackingSlips(entries, {
-        ...summary, filename, links: mailLinks(env), eve: EVE_TIME,
-        next: PACKING_TIME,
-      }),
+      event: "packing.eve.already_sent", printed: found.printed,
+      entries: chooseDay({ ...found, day, reprint: true }),
+      next: PACKING_TIME, quiet: true,
     });
   } catch (error) {
     const message = String((error && error.message) || error);
@@ -1271,19 +1341,22 @@ export const packingEve = async (stores, {
   return result;
 };
 
-// A day's packet as the morning job would build it from the orders
-// and printed records in `stores`, for the staging toolbar's preview
-// (#334). It reads and writes nothing, sends nothing.
+// A day's slips as the 3 PM packet would build them from the orders
+// and printed records in `stores`, every group in one PDF, for the
+// staging toolbar's preview (#334). It reads and writes nothing, sends
+// nothing.
 // -> { day, entries, bytes } (bytes null when there is nothing to pack).
 export const packetPreview = async (stores, day, {
   env = process.env, now = clock(),
 } = {}) => {
-  const entries = choose({ ...(await gather(stores, day)), day });
+  const entries = chooseDay({
+    ...(await gather(stores, day)), day, reprint: true,
+  });
 
   return {
     day, entries,
     bytes: entries.length ? packetPdf({
-      entries, now, title: packetTitle(day), env,
+      entries, now, day, title: packetTitle(day), env,
     }) : null,
   };
 };
@@ -1312,7 +1385,7 @@ export const changedAfterPrint = async (stores, {
 
   const { open, printed, gone } = await gather(stores, day, { every: false });
   const entries = choose({ open, printed, gone, day })
-    .filter((e) => e.order.fulfilment.date === day && e.kind !== "weekly");
+    .filter((e) => e.order.fulfilment.date === day && e.kind !== "reprint");
   const sent = [];
 
   for (const e of entries) {

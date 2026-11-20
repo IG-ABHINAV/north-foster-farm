@@ -9,6 +9,9 @@ import {
 import {
   isScheduled, orderOccurrence,
 } from "../../../assets/scripts/order/lib/dates.mjs";
+import {
+  dayName, weekday,
+} from "../../../assets/scripts/order/lib/zoned.mjs";
 import { company } from "./company.mjs";
 
 // "10:00 AM – 4:00 PM" -> "10:00 AM and 4:00 PM", for
@@ -69,6 +72,46 @@ export const packetCounts = ({ slips = 0, revised = 0, cancelled = 0 }) => [
     : "No slips",
   cancelled && `${cancelled} canceled`,
 ].filter(Boolean).join(", ");
+
+// "Saturday 11/21": a day as a packing email's subject names it, with
+// no year (#694).
+export const shortDay = (iso) => `${dayName(weekday(iso))} ${
+  Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+
+// A town and the occasion's name, the town said once: "Pawtucket" and
+// "Thanksgiving Prep" make "Pawtucket Thanksgiving Prep", while
+// "Pawtucket Farmers Market" and "Scituate Rotary Farmers Market" (in
+// North Scituate) already say where they are and stand alone.
+export const townAndName = (town, name) => {
+  const words = ` ${String(name).replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+  const said = (w) => words.includes(` ${w} `);
+
+  return !town || said(town) || said(town.split(/\s+/).at(-1))
+    ? name : `${town} ${name}`;
+};
+
+// The packing group an order's slips go in (#694), with the farm's
+// name for its place: each pickup-day occurrence is its own, on-farm
+// pickup and delivery one each. `f` is a fulfilment, or what a
+// printed snapshot kept of one. The drop site is a common noun after
+// its town: "North Scituate drop site". -> { key, place }.
+export const packingGroup = (f) => {
+  if (!isScheduled(f)) return { key: f.method, place: methodName(f.method) };
+
+  const o = orderOccurrence(terms, f);
+
+  if (!o) {
+    return {
+      key: `pickup-${f.occurrence || f.site || f.date}`,
+      place: f.occurrence ? `Pickup ${f.occurrence}` : methodName(f.method),
+    };
+  }
+
+  const name = o.kind === "drop-site"
+    ? o.name[0].toLowerCase() + o.name.slice(1) : o.name;
+
+  return { key: o.id, place: townAndName(o.town, name) };
+};
 
 // A market's place line opens with its name ("Foster Farmers’ Market,
 // Shady Acres Diner, ..."); a note that already names the series wants

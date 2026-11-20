@@ -13,9 +13,10 @@
 
 import { launchEmail } from "./launch.mjs";
 import { postMailFromBuild } from "./post-mail.mjs";
+import { packingGroup } from "./describe.mjs";
 import {
   EVE_TIME, PACKING_TIME, attachment, byFulfillment, changesBetween, countsOf,
-  eveTitle, fileName, packetPdf, packetTitle, snapshotOf,
+  fileName, groupFileName, packetPdf, packetTitle, snapshotOf,
 } from "./packing.mjs";
 import * as t from "./templates.mjs";
 import { orderPathFor } from "./site.mjs";
@@ -321,36 +322,24 @@ export const samplePacket = () => {
   };
 };
 
-const packetMail = (links) => {
-  const { day, now, entries } = samplePacket();
-  const filename = fileName(day);
-
-  return {
-    ...t.farmPackingSlips(entries, {
-      day, ...countsOf(entries), filename, links,
-    }),
-    attachments: [attachment(filename, packetPdf({
-      entries, now, title: packetTitle(day),
-    }))],
-  };
-};
-
-// The 3 PM packet the day before (#515), from the sample's first day:
-// its new orders as reprints of slips printed earlier, as most are.
-const eveMail = (links) => {
+// One group's packet from the sample (#694): the entries for `day` in
+// the group `key` names, mailed the day before at 3 PM, or as `late`
+// slips at 6 AM on the day.
+const groupMail = (key, { late = false } = {}) => (links) => {
   const { now, entries: all } = samplePacket();
-  const day = all[0].order.fulfilment.date;
-  const entries = all.filter((e) => e.order.fulfilment.date === day)
-    .map((e, i) => (e.kind === "new" && i ? { ...e, kind: "weekly" } : e));
-  const filename = fileName(day, "-full");
+  const group = (e) => packingGroup(e.order.fulfilment);
+  const entries = all.filter((e) => group(e).key === key);
+  const day = entries[0].order.fulfilment.date;
+  const { place } = group(entries[0]);
+  const filename = groupFileName(day, place, late);
 
   return {
     ...t.farmPackingSlips(entries, {
-      day, ...countsOf(entries), filename, links, eve: EVE_TIME,
-      next: PACKING_TIME,
+      day, place, late, filename, links, ...countsOf(entries),
+      ...late ? { since: EVE_TIME } : { next: PACKING_TIME },
     }),
     attachments: [attachment(filename, packetPdf({
-      entries, now, title: eveTitle(day),
+      entries, now, day, title: packetTitle(day, { place, late }),
     }))],
   };
 };
@@ -839,42 +828,25 @@ export const library = [
   },
   {
     id: "farm-packing-slips", name: "Packing slips",
-    when: "Every day at 6:00, with the PDF to print; on Sunday, the " +
-      "whole week",
+    when: "Every day at 15:00, one email per group (on-farm pickup, each " +
+      "pickup-day place and occasion, delivery) with its slips for the " +
+      "next day",
     audience: F, tags: ["report", "delivery", "pickup", "drop site", "pdf"],
-    build: packetMail,
+    build: groupMail("delivery"),
   },
   {
-    id: "farm-packing-quiet", name: "Packing slips, nothing to print",
-    when: "Every day at 6:00 when nothing is new, changed or canceled",
-    audience: F, tags: ["report"],
-    build: (links) => t.farmPackingSlips([], {
-      day: "2026-10-06", quiet: true, links,
-    }),
+    id: "farm-packing-late", name: "Late packing slips",
+    when: "Every day at 6:00, one email per group with an order for the " +
+      "day that came in, changed or was canceled after the 15:00 packet",
+    audience: F, tags: ["report", "drop site", "pdf"],
+    build: groupMail("VFVQ-261017", { late: true }),
   },
   {
-    id: "farm-packing-eve", name: "Packing slips for tomorrow",
-    when: "Every day at 15:00, with every slip for the next day",
-    audience: F, tags: ["report", "delivery", "pickup", "drop site", "pdf"],
-    build: eveMail,
-  },
-  {
-    id: "farm-packing-eve-quiet", name: "Packing slips for tomorrow, none due",
+    id: "farm-packing-quiet", name: "No packing slips",
     when: "Every day at 15:00 when no order is due the next day",
     audience: F, tags: ["report"],
     build: (links) => t.farmPackingSlips([], {
-      day: "2026-10-07", quiet: true, links, eve: EVE_TIME,
-      next: PACKING_TIME,
-    }),
-  },
-  {
-    id: "farm-packing-since-quiet",
-    name: "Packing slips, nothing changed since 3 PM",
-    when: "Every day at 6:00 when nothing is new, changed or canceled " +
-      "since the 3 PM packet",
-    audience: F, tags: ["report"],
-    build: (links) => t.farmPackingSlips([], {
-      day: "2026-10-06", quiet: true, links, since: EVE_TIME,
+      day: "2026-10-07", quiet: true, next: PACKING_TIME, links,
     }),
   },
   {

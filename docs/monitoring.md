@@ -34,10 +34,12 @@ sees, so a dead page and a silent failure both reach the phone.
 - **Backup heartbeat.** The nightly backup export (`docs/backup.md`)
   pings a third check when its copy lands in R2, and `/fail` with
   `backup.failed` when it does not. `HEALTHCHECKS_BACKUP_URL`.
-- **Packing slips heartbeat.** The 6:00 packing slips (#292,
-  `lib/packing.mjs`) ping a fourth check once the email has gone, a
-  quiet day's included, and its `/fail` with the error when the PDF
-  could not be built or sent. Production only, and required there:
+- **Packing slips heartbeat.** The 6:00 packing run (#292, #694,
+  `lib/packing.mjs`) pings a fourth check once, however many groups'
+  late slips it sent, a morning with none late included, and its
+  `/fail` with the error when any group's email could not be built or
+  sent; the 15:00 run pings only `/fail` (2026-11-20). Production
+  only, and required there:
   `check:env` fails a production build without
   `HEALTHCHECKS_PACKING_URL`, and a run that sends through Resend
   without it is a jobs error. A staging run never pings it.
@@ -139,9 +141,10 @@ sees, so a dead page and a silent failure both reach the phone.
      Netlify as `HEALTHCHECKS_BACKUP_URL`, production only, since
      the nightly run is production's alone.
    - *Packing slips*: schedule type Cron, `0 6 * * *`, time zone
-     America/New_York, grace 30 minutes. The jobs run sends the slips
-     between 6:00 and 6:15 and tries again every 15 minutes after a
-     failure, so 30 minutes covers one retry. Its ping URL goes in
+     America/New_York, grace 30 minutes. The jobs run sends the late
+     slips, or pings with none late, between 6:00 and 6:15, and tries
+     again every 15 minutes after a failure, so 30 minutes covers one
+     retry. Its ping URL goes in
      `.env.production` as `HEALTHCHECKS_PACKING_URL`, then
      `bin/nff env push --production`. Production only: staging has no
      packing check. After the release, the next 6:00 run's ping turns
@@ -771,40 +774,44 @@ order what to pack. Sent even when empty ("Nothing due"). If it has
 not arrived by 18:15, something is wrong; the heartbeat will already
 have said so.
 
-**Packing slips**, 6:00 (#292, `lib/packing.mjs`), to
-`FARM_NOTIFICATIONS_EMAIL`: one PDF to print whole. Its cover is the
-pick list, each product and tier with its total across the slips;
-then the slips by fulfillment date, type and pickup time. Sunday's
-packet holds every order for Sunday to Saturday. Other days hold the
-orders not printed yet, a revision sheet and a new slip for each
-order changed since it was printed, and a CANCELLED sheet for each
-printed order since cancelled. A quiet day still sends "nothing to
-print". What each order's slip showed is kept in the jobs store
-(`packing/printed/<id>`, contact details and address only as a hash,
-30 days past its date), and a reprint comes from comparing the order
-with it; `packing/sent/<day>` stops a second packet. After the packet,
+**Packing slips**, just in time (#292, #515, #694, `lib/packing.mjs`;
+rewritten 2026-11-20 for #694, which ended the Sunday week and the
+slips for later days), to `FARM_NOTIFICATIONS_EMAIL`: one email per
+fulfillment group, each with its own PDF to print whole. A group is
+on-farm pickup, each pickup-day place and occasion (the drop site,
+each market, each pop-up), or delivery, and the subject names it the
+farm's way: "North Scituate drop site packing slips for Saturday
+11/21". Each PDF's cover is that group's pick list, each product and
+tier with its total across its slips; then its slips by type, place
+and pickup time.
+
+- **15:00 the day before:** every slip for the next day and only that
+  day: new, revised, a reprint of one printed earlier, or a CANCELED
+  sheet for one printed and since cancelled. A day with nothing to
+  print gets one "No packing slips for Saturday 11/21" email instead.
+  It is started by 21:00 or not at all (a packet already started is
+  retried after), and `packing/eve/<day>` keeps it sent with its
+  `cutoff`, the time of the run that fixed the packet.
+- **6:00 the day itself:** only what came in, changed or was cancelled
+  after the 15:00 packet read the orders, in its group's email marked
+  "Late: ", and nothing at all when none is late. It compares with
+  what was printed, not with the time. If the 15:00 packet never went,
+  the day's whole set goes, unmarked. `packing/sent/<day>` stops a
+  second run.
+
+An order moved off its day after its slip was printed goes, with its
+revision sheet, to the group its old slip is in. What each order's
+slip showed is kept in the jobs store (`packing/printed/<id>`, contact
+details and address only as a hash, 30 days past its date), and a
+reprint comes from comparing the order with it. After the 6:00 run,
 an order due that day that changes anyway (the CLI, a refund noted
 from Square or PayPal) is mailed at once as "Changed after printing",
-with its sheets. Its heartbeat is the *Packing slips* check. The
-staging toolbar's email library previews the email and the PDF.
-Staging's own jobs runs put its packet in the outbox, never in a
-mailbox, and a run with `reset` lets the day's packet go again.
-
-**Packing slips for tomorrow**, 15:00 the day before (#515, same
-file), so the farm can pack the night before: every slip for the next
-day, new, revised, a reprint of one printed earlier, or a CANCELED
-sheet, with the same cover, and each order new, changed or canceled
-for a later day, as the morning packet would have it; "nothing due"
-when there is none. It is started by 21:00 or not at all (a packet
-already started is retried after), and `packing/eve/<day>` keeps it
-sent with its `cutoff`, the time of the run that fixed the packet.
-The next morning's packet compares with what it printed, not with the
-time, so it carries only the orders that came in, changed or were
-cancelled after the 3 PM packet read them (on Sunday, the rest of the
-week as well), and a quiet morning says "nothing changed since 3 PM".
-A failure pings the packing check's `/fail`; a success does not ping,
-so the check's 6:00 schedule stands, and after a 3 PM failure the
-check stays down until the morning's packet goes.
+with its sheets. The 6:00 run pings the *Packing slips* check once; a
+15:00 success does not ping, so the check's 6:00 schedule stands, and
+after a 15:00 failure the check stays down until the 6:00 run goes.
+The staging toolbar's email library previews the emails and a PDF.
+Staging's own jobs runs put the emails in the outbox, never in a
+mailbox, and a run with `reset` lets the day's 6:00 run go again.
 
 ## The log
 

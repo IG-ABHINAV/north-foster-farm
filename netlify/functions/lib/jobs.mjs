@@ -36,11 +36,15 @@
 //               messages to the farm not yet marked answered
 //   tomorrow    18:00 daily, always: every order due tomorrow, by
 //               method, with what to pack and where it goes
-//   packing     6:00 daily, always: the packing slips as one PDF, or
-//               "nothing to print"; then, all day, an order due today
-//               that changes after it was printed (lib/packing.mjs)
-//   packingEve  15:00 daily, always: every slip for tomorrow, so the
-//               6:00 packet carries only what came after it (#515)
+//   packing     6:00 daily: the day's late slips, one email and PDF
+//               per fulfillment group with an order that came in,
+//               changed or was cancelled after the 15:00 packet, and
+//               nothing when none is late; then, all day, an order due
+//               today that changes after it was printed
+//               (lib/packing.mjs; #694, 2026-11-20)
+//   packingEve  15:00 daily, always: every slip for tomorrow and only
+//               tomorrow, one email and PDF per fulfillment group, or
+//               one "No packing slips" email (#515, #694)
 //   audience    once a day from 05:00: the farm-news audience in Resend
 //               and the records made to agree
 //   rotation    8:00 on Dec 1 and weekly after, to the developer: the

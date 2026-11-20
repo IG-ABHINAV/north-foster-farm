@@ -95,7 +95,7 @@ describe("the packing slip routes", () => {
 
       await saveOrder(stores, order({ id: "NFF-2610-TEST" }));
 
-      const res = await handle(ask(`${TODAY}2026-10-06`), {
+      const res = await handle(ask(`${TODAY}2026-10-08`), {
         stores, env,
       });
 
@@ -103,11 +103,15 @@ describe("the packing slip routes", () => {
       assert.match(text(await res.arrayBuffer()), /NFF-2610-TEST/);
       assert.deepEqual([...stores.jobs.data.keys()], before);
 
-      const empty = await handle(ask(`${TODAY}2026-10-09`), {
-        stores, env,
-      });
+      // The day's slips alone, as the 3 PM packet has them (#694): the
+      // 6th has none of its own, and a later day's order is not its.
+      for (const day of ["2026-10-06", "2026-10-09"]) {
+        const empty = await handle(ask(`${TODAY}${day}`), {
+          stores, env,
+        });
 
-      assert.equal(empty.status, 404);
+        assert.equal(empty.status, 404, day);
+      }
 
       const bad = await handle(ask(`${TODAY}soon`), {
         stores, env,

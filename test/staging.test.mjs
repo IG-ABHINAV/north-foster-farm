@@ -539,7 +539,8 @@ describe("the email library", () => {
       "/api/staging/emails/farm-packing-slips/attachments/nope.pdf"),
     { stores, env });
 
-    assert.equal(file.filename, "packing-slips-2026-10-06.pdf");
+    // The sample is a group's 3 PM email (#694).
+    assert.equal(file.filename, "packing-slips-2026-10-08-delivery.pdf");
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("content-type"), "application/pdf");
     assert.equal(bytes.subarray(0, 8).toString("latin1"), "%PDF-1.4");

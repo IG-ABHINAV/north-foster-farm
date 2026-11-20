@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { touchesShape } from "../bin/check-record-shape.mjs";
 import { refundOrder } from "../netlify/functions/lib/admin.mjs";
 import {
   creditBalance, getLedger, grantCredit, restoreCredit, spendCredit,
@@ -117,5 +118,12 @@ describe("a restore's refund id (#684)", () => {
       orderId: ORDER, amount: 500, refundId: "edit-k-0", now,
     });
     assert.equal(await creditBalance(stores, EMAIL, now), 1_000);
+  });
+});
+
+describe("the credit ledger's shape", () => {
+  it("is one the record-shape check watches", () => {
+    assert.deepEqual(touchesShape(["netlify/functions/lib/credit.mjs"]),
+      ["netlify/functions/lib/credit.mjs"]);
   });
 });

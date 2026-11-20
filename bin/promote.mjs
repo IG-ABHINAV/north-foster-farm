@@ -39,8 +39,9 @@
 // failed run also ships when James lists every test that failed every
 // try in it, with a reason, under "## Failing tests shipped past" on
 // the release pull request: the deliberate override, which needs the
-// LGTM label and green checks as ever, refuses any failure not listed,
-// and once main has moved logs `promote.override`.
+// LGTM label and green checks as ever, a label newer than the body's
+// last edit, refuses any failure not listed, and once main has moved
+// logs `promote.override`.
 //
 // A release branch (`promote main release/<name>`, James, 2026-10-26)
 // takes main one step by a merge commit instead of moving it to a
@@ -65,6 +66,7 @@ import { evaluate, incompleteExceptions } from "./audit/findings.mjs";
 import { printable } from "./e2e/dispatch.mjs";
 import {
   SHIPPED_PAST, flakyInLog, named, retriedInLog, shippedPast,
+  shippedPastItem,
 } from "./e2e/retries.mjs";
 import {
   EXEMPTIONS, exemptionProblems, judgedRun, stagingExemption,
@@ -145,8 +147,11 @@ const git = async (args) => (await run("git", args)).stdout.trim();
 // GET of a list follows every page and returns one array. With `text`,
 // a GET of a job's log as text, never parsed: gh refuses a Playwright
 // log's escape sequences unless told to pass them (#623), and what it
-// passes is read only through printable().
-const ghApi = async (path, { fields, all = false, text = false } = {}) => {
+// passes is read only through printable(). With `query`, a read through
+// GitHub's GraphQL (`path` is "graphql"), its variables in `vars`.
+const ghApi = async (path, {
+  fields, all = false, text = false, query, vars = {},
+} = {}) => {
   if (text) {
     return (await run("gh", ["api", "--allow-escape-sequences", path],
       { maxBuffer: 64 * 1024 * 1024 })).stdout;
@@ -154,11 +159,18 @@ const ghApi = async (path, { fields, all = false, text = false } = {}) => {
 
   // A number goes as a typed field (-F), so GitHub gets an integer (a
   // milestone); text always as a raw string (-f), never read for @file.
-  const post = fields
-    ? ["-X", "POST", ...Object.entries(fields)
-      .flatMap(([key, value]) => [typeof value === "number" ? "-F" : "-f",
-        `${key}=${value}`])]
-    : [];
+  const typed = (values) => Object.entries(values)
+    .flatMap(([key, value]) => [typeof value === "number" ? "-F" : "-f",
+      `${key}=${value}`]);
+
+  if (query !== undefined) {
+    const { stdout } = await run("gh", ["api", path,
+      ...typed({ query, ...vars })]);
+
+    return JSON.parse(stdout);
+  }
+
+  const post = fields ? ["-X", "POST", ...typed(fields)] : [];
   const pages = all ? ["--paginate", "--slurp"] : [];
   const { stdout } = await run("gh", ["api", ...pages, ...post, path],
     { maxBuffer: 64 * 1024 * 1024 });
@@ -423,25 +435,83 @@ const flakyOfGreen = async (api, job, out) => {
 // SHIPPED_PAST in the release pull request's body. `refusal` is the
 // error the recorded exemption threw, thrown again when the run or its
 // log cannot be judged. -> { run, failures, flaky } or throws.
-const shipPast = async (api, { pr, sha, listed, refusal }) => {
+// The judged staging run and what its log says of retried tests, or
+// null when either cannot be had.
+const retriedRun = async (api, sha) => {
   const judged = await judgedRun(api, {
     repo: REPO, staging: STAGING_E2E, sha,
   });
 
-  if (!judged) throw refusal;
+  if (!judged) return null;
 
   const read = await jobLog(api, judged.job.id).then(retriedInLog,
     () => null);
 
+  return read ? { run: judged.run, ...read } : null;
+};
+
+// How to list `tests` on the pull request, ready to paste (#696, qa 1).
+const pasteHint = (pr, tests) => [
+  `To ship past ${tests.length === 1 ? "it" : "them"}, put this heading `
+    + `and one line per test in PR #${pr.number}'s body, REASON saying `
+    + `why, then label it ${APPROVAL_LABEL} again:`,
+  "", SHIPPED_PAST, "", ...tests.map((t) => shippedPastItem(named(t))),
+].join("\n");
+
+// The list binds to James's approval only if the body holding it is
+// as he saw it when he labeled: refused when GitHub says it was edited
+// at or after the newest LGTM label, or cannot say (#696, security 3).
+// REST's updated_at moves on labels and comments too, so GraphQL's
+// lastEditedAt it is; null means never edited since it was opened.
+const EDITED = "query($owner:String!,$name:String!,$number:Int!)"
+  + "{repository(owner:$owner,name:$name){pullRequest(number:$number)"
+  + "{number lastEditedAt}}}";
+
+export const listUnchanged = async (api, { pr, timeline }) => {
+  const [owner, name] = REPO.split("/");
+  const labeled = timeline.filter((e) => e.event === "labeled"
+    && e.label?.name === APPROVAL_LABEL).map((e) => e.created_at).sort()
+    .at(-1);
+  let edited;
+
+  try {
+    const got = (await api("graphql", { query: EDITED,
+      vars: { owner, name, number: pr.number } }))?.data?.repository
+      ?.pullRequest;
+
+    if (typeof got !== "object" || got === null
+      || !("lastEditedAt" in got)) {
+      throw new Error("no answer");
+    }
+    edited = got.lastEditedAt;
+  } catch {
+    throw new Error(`Refused: GitHub did not say when PR #${pr.number}'s `
+      + `body was last edited, so its "${SHIPPED_PAST}" list cannot be `
+      + `dated against the ${APPROVAL_LABEL} label.`);
+  }
+  if (edited === null) return;
+  if (typeof edited !== "string" || !labeled
+    || !(Date.parse(labeled) > Date.parse(edited))) {
+    throw new Error(`Refused: the list changed after ${APPROVAL_LABEL}; `
+      + `label it again. PR #${pr.number}'s body was edited at ${
+        printable(String(edited))}, and the newest ${APPROVAL_LABEL} label `
+      + `is from ${printable(String(labeled))}.`);
+  }
+};
+
+const shipPast = async (api, { pr, sha, listed, refusal }) => {
+  const read = await retriedRun(api, sha);
+
   if (!read) throw refusal;
 
-  const { run } = judged;
+  const { run } = read;
   const unlisted = read.failed.filter((t) => !listed.has(named(t)));
 
   if (unlisted.length) {
     throw new Error(`Refused: these tests failed every try in staging run `
       + `${run.id} and are not listed with a reason under "${SHIPPED_PAST}" `
-      + `on PR #${pr.number}: ${unlisted.map(named).join("; ")}.`);
+      + `on PR #${pr.number}: ${unlisted.map(named).join("; ")}.\n${
+        pasteHint(pr, unlisted)}`);
   }
 
   return {
@@ -452,10 +522,29 @@ const shipPast = async (api, { pr, sha, listed, refusal }) => {
   };
 };
 
+const UNSAFE = /[@`]/;
+
+// Whether an issue's title names the test `name` whole: at its end or
+// in backticks, after its start, a space or a backtick, so one test's
+// name is never taken for a longer one it begins (#696, qa).
+export const namesTest = (title, name) => {
+  const at = (from) => title.indexOf(name, from);
+
+  for (let i = at(0); i !== -1; i = at(i + 1)) {
+    const before = i === 0 ? " " : title[i - 1];
+    const after = title[i + name.length] ?? "";
+
+    if ((before === " " || before === "`")
+      && (after === "" || after === "`")) return true;
+  }
+
+  return false;
+};
+
 // Each flaky test of an accepted run, filed in FLAKY_MILESTONE: a
 // comment on the open issue there whose title names it, or a new issue.
 // Main has moved by now, so a failure here is said, not thrown.
-const fileFlaky = async (api, { flaky, run, sha, out }) => {
+export const fileFlaky = async (api, { flaky, run, sha, out }) => {
   if (!flaky.length) return;
 
   const url = printable(run.html_url);
@@ -478,7 +567,17 @@ const fileFlaky = async (api, { flaky, run, sha, out }) => {
 
     for (const [i, t] of flaky.entries()) {
       const which = `flaky test ${i + 1} of ${flaky.length}`;
-      const known = open.find((issue) => issue.title.includes(named(t)));
+
+      // A test's name is log text, and this posts as the CLI's account:
+      // an at sign could ping a login or start a Claude run, a backtick
+      // breaks the code span (#696, security 1).
+      if (UNSAFE.test(named(t))) {
+        out(`Not filing ${which}, ${named(t)}: its name holds an at sign `
+          + "or a backtick, so file this one by hand.");
+        continue;
+      }
+
+      const known = open.find((issue) => namesTest(issue.title, named(t)));
 
       if (known) {
         const body = `Flaky again in the full staging run ${url} at ${sha}, `
@@ -641,7 +740,16 @@ export const promote = async (
       } catch (error) {
         const listed = shippedPast(pr.body);
 
-        if (!listed.size && !error.unread) throw error;
+        if (!listed.size && !error.unread) {
+          // With retries on, the exemption cannot accept a retried
+          // failure, so say how the override would (#696, qa 1). The
+          // refusal itself stays the exemption's, word for word.
+          const read = await retriedRun(api, tested).catch(() => null);
+
+          if (read?.failed.length) out(pasteHint(pr, read.failed));
+          throw error;
+        }
+        if (listed.size) await listUnchanged(api, { pr, timeline });
         overridden = await shipPast(api, {
           pr, sha: tested, listed, refusal: error,
         });

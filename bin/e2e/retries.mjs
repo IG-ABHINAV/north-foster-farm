@@ -145,7 +145,20 @@ export const retriedInLog = (log) => {
 // the next heading or the end of the body, one item per test,
 // "- `SPEC › TITLE`: REASON". -> Map of name to reason; an item with a
 // blank reason is left out, so its test counts as not listed.
+//
+// James approves what GitHub shows him, and it shows nothing inside an
+// HTML comment or a code fence as a list item. So a body that holds
+// either anywhere up to the section's end is refused outright, since
+// it could hide an item or the heading itself (#696, security 2).
 export const SHIPPED_PAST = "## Failing tests shipped past";
+
+// An item as it is written, for a refusal to show: "- `NAME`: REASON".
+export const shippedPastItem = (name) => `- \`${name}\`: REASON`;
+
+const HIDDEN = [
+  [(l) => l.includes("<!--"), "an HTML comment"],
+  [(l) => /^ {0,3}(`{3,}|~{3,})/.test(l), "a code fence"],
+];
 
 export const shippedPast = (body) => {
   const listed = new Map();
@@ -153,9 +166,20 @@ export const shippedPast = (body) => {
   const start = lines.findIndex((l) => l.trimEnd() === SHIPPED_PAST);
 
   if (start === -1) return listed;
-  for (const line of lines.slice(start + 1)) {
-    if (/^#{1,6} /.test(line)) break;
 
+  const after = lines.slice(start + 1);
+  const next = after.findIndex((l) => /^#{1,6} /.test(l));
+  const section = next === -1 ? after : after.slice(0, next);
+
+  for (const [holds, what] of HIDDEN) {
+    if ([...lines.slice(0, start + 1), ...section].some(holds)) {
+      throw new Error(`Refused: the release pull request holds ${what} `
+        + `at or before its "${SHIPPED_PAST}" list, which GitHub does `
+        + "not show as written, so the list cannot be read. Take it out "
+        + "and promote again.");
+    }
+  }
+  for (const line of section) {
     const m = /^[-*] `([^`]+)`: (.*)$/.exec(line.trimEnd());
 
     if (m && m[2].trim() !== "" && !listed.has(m[1])) {

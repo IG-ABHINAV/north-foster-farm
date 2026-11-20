@@ -70,4 +70,41 @@ describe("bin/e2e/retries.mjs", () => {
       assert.equal(shippedPast("- `a › one`: no heading").size, 0);
       assert.equal(shippedPast(undefined).size, 0);
     });
+
+  // #696, security 2: GitHub shows James none of these as list items.
+  it("refuses a list that an HTML comment could hide", () => {
+    const heading = "## Failing tests shipped past";
+    const item = "- `a › one`: known";
+
+    for (const body of [
+      [heading, "<!--", item, "-->"],
+      [heading, `${item} <!-- and more -->`],
+      ["<!--", heading, item, "-->"],
+    ]) {
+      assert.throws(() => shippedPast(body.join("\n")),
+        /^Error: Refused: .*an HTML comment/);
+    }
+  });
+
+  it("refuses a list that a code fence could hide", () => {
+    const heading = "## Failing tests shipped past";
+    const item = "- `a › one`: known";
+
+    for (const body of [
+      [heading, "```", item, "```"],
+      [heading, "~~~md", item, "~~~"],
+      ["```", heading, item],
+    ]) {
+      assert.throws(() => shippedPast(body.join("\n")),
+        /^Error: Refused: .*a code fence/);
+    }
+  });
+
+  it("reads past a fence or comment only after the section", () => {
+    const body = ["## Failing tests shipped past", "- `a › one`: known",
+      "## Notes", "<!-- a note -->", "```", "code", "```"].join("\n");
+
+    assert.deepEqual([...shippedPast(body)], [["a › one", "known"]]);
+    assert.equal(shippedPast("```\nno heading\n```").size, 0);
+  });
 });

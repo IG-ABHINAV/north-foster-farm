@@ -1,0 +1,14 @@
+{
+  "_source": {
+    "recorded": "2026-11-20",
+    "by": "the e2e-cmd lane, with gh, read-only, for #693",
+    "requests": [
+      "POST graphql: query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number lastEditedAt}}} with north-foster-farm/north-foster-farm, 696",
+      "the same, 680"
+    ],
+    "scrubbed": "Nothing: neither answer holds a login, a secret or an address.",
+    "note": "unedited is a pull request whose body was never edited (lastEditedAt null); edited is a release pull request whose body was."
+  },
+  "unedited": {"data":{"repository":{"pullRequest":{"number":696,"lastEditedAt":null}}}},
+  "edited": {"data":{"repository":{"pullRequest":{"number":680,"lastEditedAt":"2026-11-19T18:22:46Z"}}}}
+}

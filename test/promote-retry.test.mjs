@@ -130,6 +130,7 @@ const EXEMPT = JSON.parse(text("e2e-exempt.json"));
 const CHECKS = JSON.parse(text("check-runs-green.json")).response;
 const ISSUES = JSON.parse(text("e2e-flaky-issues.json"));
 const STAGING = JSON.parse(text("e2e-retry.json")).staging;
+const EDITS = JSON.parse(text("pr-last-edited.json"));
 const recorded = () => STAGING;
 
 const SHA = "1471cc858676dcc3bb4cad29ccc2c6ffca34f377";
@@ -227,6 +228,10 @@ const world = (staging, {
         created_at: "2026-11-18T23:00:00Z",
       }] : [];
     }
+    // Added by the implementer for #696 (security 3), a route only:
+    // when the body was last edited, recorded in pr-last-edited.json
+    // from a pull request never edited, as the hand-shaped one here.
+    if (path === "graphql") return clone(EDITS.unedited);
 
     throw new Error(`no recording for ${path}`);
   };

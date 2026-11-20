@@ -337,9 +337,15 @@ here instead of restating it (2026-11-01, #494).
    pull request's body, as ``- `SPEC › TITLE`: REASON``, and promote
    ships only when every failure is listed with a reason, prints
    each, and logs `promote.override`. The override needs the LGTM
-   label and the green checks as ever. Specs that must not run twice
-   (a payment, a one-time emailed link) set `retries: 0` themselves;
-   each says why at its `test.describe.configure`.
+   label and the green checks as ever, and the label must be newer
+   than the body's last edit: change the list, label it again. A
+   body with an HTML comment or a code fence at or before the list
+   is refused, since GitHub would hide an item in either
+   (2026-11-20, #696). A flaky test whose name holds an at sign or
+   a backtick is not filed; promote says to file it by hand. Specs
+   that must not run twice (a payment, a one-time emailed link) set
+   `retries: 0` themselves; each says why at its
+   `test.describe.configure`.
 8. **A push to `staging` or `main` re-checks nothing `next` already
    passed** (#580, 2026-11-14). `ci.yml` and `codeql.yml` start with a
    `proven` job (`proven-on-next.yml`) that asks GitHub for a

@@ -337,8 +337,7 @@ const flakyOf = (logs) => {
 
   for (const log of logs) {
     for (const t of flakyInLog(log) ?? []) {
-      const key = `${t.spec}
-${t.title}`;
+      const key = `${t.spec}\n${t.title}`;
       const seen = tests.get(key);
 
       if (seen) seen.projects = unique([...seen.projects, ...t.projects]);
@@ -380,8 +379,7 @@ const report = async (api, run, out) => {
   for (const { job, log } of logs) {
     if (job.conclusion !== "failure") continue;
     for (const f of failuresInLog(log)) {
-      const key = `${f.file}
-${f.title}`;
+      const key = `${f.file}\n${f.title}`;
       const seen = tests.get(key);
 
       if (seen) seen.projects = unique([...seen.projects, ...f.projects]);

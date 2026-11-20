@@ -121,6 +121,13 @@ jobs:
           E2E_STAGING_TOKEN: ${{ secrets.E2E_STAGING_TOKEN }}
         run: node bin/e2e/sweep.mjs
 
+      # top-bar-places.spec.mjs builds the real top-bar partial in a
+      # small Hugo site of its own, so the runner needs Hugo even
+      # though staging serves the site. The same pinned, checksummed
+      # action as e2e-run.yml.
+      - uses: ./.github/actions/setup-hugo
+        if: ${{ !cancelled() && env.SUPERSEDED != '1' && !inputs.sweep_only }}
+
       # A leftover the sweep could not remove fails the job but never
       # keeps the specs from running (security review).
       - uses: ./.github/actions/setup-playwright

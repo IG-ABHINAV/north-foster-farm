@@ -34,8 +34,10 @@
 //               orders within two days still waiting on the customer,
 //               a warning when the pickup schedule runs short, and the
 //               messages to the farm not yet marked answered
-//   tomorrow    18:00 daily, always: every order due tomorrow, by
-//               method, with what to pack and where it goes
+//   tomorrow    18:00 daily: every order due tomorrow, by method, with
+//               what to pack and where it goes, and no email when
+//               nothing is due (#697, 2026-11-20; it went every day
+//               before)
 //   packing     6:00 daily: the day's late slips, one email and PDF
 //               per fulfillment group with an order that came in,
 //               changed or was cancelled after the 15:00 packet, and
@@ -1250,9 +1252,10 @@ const morningReport = async (stores, {
   return sent ? sent[0].pickups.map((o) => o.id) : [];
 };
 
-// 18:00 daily, always: every order due tomorrow, by method, with what
-// the driver and the packer need. -> how many, or null when not sent
-// this run.
+// 18:00 daily: every order due tomorrow, by method, with what the
+// driver and the packer need. With nothing due no email goes, and the
+// day is still recorded as done (#697, 2026-11-20). -> how many are
+// due (0 on an empty day), or null when the step did nothing this run.
 export const dueOn = (orders, date) =>
   orders.filter((o) => o.fulfilment.date === date);
 
@@ -1262,7 +1265,6 @@ const tomorrowReport = async (stores, { env, mail, now }) => {
   const sent = await dailyReport(stores, {
     key: `report/tomorrow/${day}`,
     hour: TOMORROW_REPORT_HOUR,
-    always: true,
     list: async () => dueOn(await openOrders(stores), tomorrow),
     build: (orders) => farmTomorrow(orders, {
       date: tomorrow, links: mailLinks(env),

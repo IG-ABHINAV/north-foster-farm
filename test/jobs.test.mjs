@@ -1075,7 +1075,8 @@ describe("runJobs", () => {
       assert.match(report().text, /No messages waiting on an answer/);
     });
 
-  it("sends tomorrow's manifest at 18:00, even when empty", async () => {
+  it("sends tomorrow's manifest at 18:00, and none when nothing is due " +
+    "(#697)", async () => {
     const stores = testStores();
     const { sent, opts } = harness();
     const env = { ...MAILS };
@@ -1117,16 +1118,12 @@ describe("runJobs", () => {
     assert.match(next[1].text, /Deliveries \(1\)/);
     assert.match(next[1].text, /- Address: 1 Main St, Foster/);
 
+    // Nothing due tomorrow: no manifest at all (#697).
     const empty = testStores();
-    const nothing = await runJobs(empty, {
-      ...opts, env, now: at("2026-10-06", 18),
-    });
 
-    assert.equal(nothing.tomorrow, 0);
-    const last = sent.filter((m) => /^Tomorrow, /.test(m.subject)).at(-1);
-
-    assert.match(last.subject, /Tomorrow, Wednesday, October 7: 0/);
-    assert.match(last.text, /Nothing due Wednesday, October 7/);
+    await runJobs(empty, { ...opts, env, now: at("2026-10-06", 18) });
+    assert.equal(sent.filter((m) => /^Tomorrow, /.test(m.subject)).length,
+      2, "no manifest for an empty Wednesday");
   });
 
   it("isolates a failing order, records the run, alerts and pings",

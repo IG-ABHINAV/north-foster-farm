@@ -69,8 +69,9 @@ sees, so a dead page and a silent failure both reach the phone.
 - **Morning report.** 8:00 daily, always: the last day in numbers,
   a warning if the pickup schedule runs short, then pickups waiting on
   the customer. `FARM_NOTIFICATIONS_EMAIL`.
-- **Tomorrow.** 18:00 daily, always: every order due tomorrow by
-  method, with what to pack and where to leave it.
+- **Tomorrow.** 18:00 daily: every order due tomorrow by method,
+  with what to pack and where to leave it, and no email when nothing
+  is due (2026-11-20, #697: it went every day before).
   `FARM_NOTIFICATIONS_EMAIL`.
 - **Dated rebuild.** On the day a money change takes effect (`money.
   changes` in `data/delivery.json`, 1 January 2027 for the first), the
@@ -770,8 +771,10 @@ the same. This email also pings the *Alerts* check well.
 **Tomorrow**, 18:00: every order due the next day, grouped delivery,
 drop site, on-farm, each with customer and phone, and for a
 delivery the address, cooler, gate code and notes, and for every
-order what to pack. Sent even when empty ("Nothing due"). If it has
-not arrived by 18:15, something is wrong; the heartbeat will already
+order what to pack. Not sent when nothing is due (2026-11-20, #697:
+it went every day before, saying "Nothing due"), so a quiet evening
+is no alarm by itself. On a day with an order due, if it has not
+arrived by 18:15, something is wrong; the heartbeat will already
 have said so.
 
 **Packing slips**, just in time (#292, #515, #694, `lib/packing.mjs`;

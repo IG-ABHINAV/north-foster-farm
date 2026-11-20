@@ -224,11 +224,13 @@ inbox hears.
       pickups waiting on the customer.", as `lib/templates.mjs` words
       it; 2026-11-01, #494). It pings the *Alerts* check
       well; that check is green after 8:00.
-- [ ] 18:00: "Tomorrow, <date>: N orders" arrives every day, grouped
+- [ ] 18:00: "Tomorrow, <date>: N orders" arrives on every day with
+      an order due the next day, grouped
       delivery, then one heading per scheduled occurrence ("<series
       name>, <day>, <place>, <hours> (n)": the series' own name,
-      never "Scheduled pickup"), then on-farm, with pack lines;
-      "Nothing due" on an empty day.
+      never "Scheduled pickup"), then on-farm, with pack lines; no
+      email on an empty day (2026-11-20, #697: it said "Nothing due"
+      before).
 - [ ] Force a checkout failure (a wrong `SQUARE_ACCESS_TOKEN` on a
       preview): the customer sees the failure card and the farm gets
       "Site alert: order.create_failed" or "Site alert:

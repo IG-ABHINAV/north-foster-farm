@@ -315,8 +315,9 @@ export const judgedJob = (jobs, { job, step }) => {
 };
 
 // The judged run: the newest failed push run of the staging suite on
-// `sha` that judgedJob() can judge. -> { run, job } or null.
-const judgedRun = async (api, { repo, staging, sha }) => {
+// `sha` that judgedJob() can judge. -> { run, job } or null. The
+// deliberate override (#693) judges the same run.
+export const judgedRun = async (api, { repo, staging, sha }) => {
   const { workflow_runs: runs } = await api(`repos/${repo}/actions/`
     + `workflows/${staging.workflow}/runs?branch=${staging.branch}`
     + `&head_sha=${sha}&per_page=100`);
@@ -397,9 +398,11 @@ export const stagingExemption = async ({
 
   const failures = failedInLog(log);
 
+  // A log with retried tests in it is one this cannot read; marked so
+  // promote can say which tests the override would have to list (#693).
   if (!failures) {
-    throw new Error(`Refused: the failed tests of run ${run.id} cannot be `
-      + "read from its log.");
+    throw Object.assign(new Error(`Refused: the failed tests of run ${run.id} `
+      + "cannot be read from its log."), { unread: true });
   }
 
   const record = await readRecord(show, sha);

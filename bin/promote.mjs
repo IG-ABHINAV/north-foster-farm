@@ -31,6 +31,17 @@
 // bin/staging-exempt.mjs (#654), which prints each exemption it used
 // and, once main has moved, logs them as `promote.exemptions`.
 //
+// Retries are on (#693, 2026-11-20). A test that passed on a retry is
+// flaky: its run is green and is accepted, and promote prints each
+// flaky test by name and, once main has moved, files it in the "Next
+// release" milestone (a new issue, or a comment on the open one whose
+// title names it), since a flaky test never blocks a release. A
+// failed run also ships when James lists every test that failed every
+// try in it, with a reason, under "## Failing tests shipped past" on
+// the release pull request: the deliberate override, which needs the
+// LGTM label and green checks as ever, refuses any failure not listed,
+// and once main has moved logs `promote.override`.
+//
 // A release branch (`promote main release/<name>`, James, 2026-10-26)
 // takes main one step by a merge commit instead of moving it to a
 // staging commit: its first parent is exactly main, its second parent
@@ -51,8 +62,13 @@ import { promisify } from "node:util";
 
 import { collectFindings, npmAudit, summary } from "./audit/check.mjs";
 import { evaluate, incompleteExceptions } from "./audit/findings.mjs";
-import { EXEMPTIONS, exemptionProblems, stagingExemption }
-  from "./staging-exempt.mjs";
+import { printable } from "./e2e/dispatch.mjs";
+import {
+  SHIPPED_PAST, flakyInLog, named, retriedInLog, shippedPast,
+} from "./e2e/retries.mjs";
+import {
+  EXEMPTIONS, exemptionProblems, judgedRun, stagingExemption,
+} from "./staging-exempt.mjs";
 import { log } from "../netlify/functions/lib/log.mjs";
 
 export { EXEMPTIONS, exemptionProblems };
@@ -115,7 +131,12 @@ export const USAGE = `
                                       e2e run against staging on that
                                       staging commit (e2e/staging-full),
                                       or a failed one whose failures are
-                                      all exempt (e2e/staging-exempt.json)`
+                                      all exempt (e2e/staging-exempt.json)
+                                      or all listed with a reason under
+                                      "## Failing tests shipped past" on
+                                      the release pull request. Names
+                                      each flaky test and files it in
+                                      the "Next release" milestone`
   .slice(1);
 
 const git = async (args) => (await run("git", args)).stdout.trim();
@@ -131,9 +152,12 @@ const ghApi = async (path, { fields, all = false, text = false } = {}) => {
       { maxBuffer: 64 * 1024 * 1024 })).stdout;
   }
 
+  // A number goes as a typed field (-F), so GitHub gets an integer (a
+  // milestone); text always as a raw string (-f), never read for @file.
   const post = fields
     ? ["-X", "POST", ...Object.entries(fields)
-      .flatMap(([key, value]) => ["-f", `${key}=${value}`])]
+      .flatMap(([key, value]) => [typeof value === "number" ? "-F" : "-f",
+        `${key}=${value}`])]
     : [];
   const pages = all ? ["--paginate", "--slurp"] : [];
   const { stdout } = await run("gh", ["api", ...pages, ...post, path],
@@ -353,6 +377,7 @@ export const stagingSuite = async (api, sha) => {
     if (specsRan(jobs ?? [])) {
       return {
         ok: true, reason: `full e2e passed on staging at ${sha}: ${r.html_url}`,
+        run: r, job: jobs.find((j) => j.name === STAGING_E2E.job),
       };
     }
   }
@@ -360,6 +385,128 @@ export const stagingSuite = async (api, sha) => {
   return { ok: false, reason: "the full e2e suite has not passed against "
     + `staging on ${sha}. Push it to ${STAGING_E2E.branch} and promote `
     + "once that run is green" };
+};
+
+// The milestone a flaky test is filed in, to be fixed right after the
+// release it did not block (James, 2026-11-20, #693).
+export const FLAKY_MILESTONE = "Next release";
+
+const jobLog = (api, job) => api(`repos/${REPO}/actions/jobs/${job}/logs`,
+  { text: true });
+
+const flakyLine = (t) => `flaky, passed on a retry: ${named(t)} (${
+  t.projects.join(", ")})`;
+
+// The flaky tests of a green full run, from its e2e-staging job's log.
+// A log that cannot be read never refuses a green run, but says so.
+const flakyOfGreen = async (api, job, out) => {
+  let flaky = null;
+
+  try {
+    if (Number.isSafeInteger(job?.id)) flaky = flakyInLog(await jobLog(api,
+      job.id));
+  } catch {
+    flaky = null;
+  }
+  if (!flaky) {
+    out("Could not read the flaky tests from the run's log: look at its "
+      + "closing lists before filing any by hand.");
+
+    return [];
+  }
+
+  return flaky;
+};
+
+// The deliberate override (#693): a failed full run ships when every
+// test that failed every try in it is listed, with a reason, under
+// SHIPPED_PAST in the release pull request's body. `refusal` is the
+// error the recorded exemption threw, thrown again when the run or its
+// log cannot be judged. -> { run, failures, flaky } or throws.
+const shipPast = async (api, { pr, sha, listed, refusal }) => {
+  const judged = await judgedRun(api, {
+    repo: REPO, staging: STAGING_E2E, sha,
+  });
+
+  if (!judged) throw refusal;
+
+  const read = await jobLog(api, judged.job.id).then(retriedInLog,
+    () => null);
+
+  if (!read) throw refusal;
+
+  const { run } = judged;
+  const unlisted = read.failed.filter((t) => !listed.has(named(t)));
+
+  if (unlisted.length) {
+    throw new Error(`Refused: these tests failed every try in staging run `
+      + `${run.id} and are not listed with a reason under "${SHIPPED_PAST}" `
+      + `on PR #${pr.number}: ${unlisted.map(named).join("; ")}.`);
+  }
+
+  return {
+    run, flaky: read.flaky,
+    failures: read.failed.map((t) => ({
+      spec: t.spec, title: t.title, reason: listed.get(named(t)),
+    })),
+  };
+};
+
+// Each flaky test of an accepted run, filed in FLAKY_MILESTONE: a
+// comment on the open issue there whose title names it, or a new issue.
+// Main has moved by now, so a failure here is said, not thrown.
+const fileFlaky = async (api, { flaky, run, sha, out }) => {
+  if (!flaky.length) return;
+
+  const url = printable(run.html_url);
+
+  try {
+    const milestone = (await api(`repos/${REPO}/milestones?state=open`
+      + "&per_page=100")).find((m) => m.title === FLAKY_MILESTONE
+      && m.state === "open" && Number.isSafeInteger(m.number));
+
+    if (!milestone) {
+      out(`No open "${FLAKY_MILESTONE}" milestone, so the flaky tests above `
+        + "are not filed: file each by hand.");
+
+      return;
+    }
+
+    const open = (await api(`repos/${REPO}/issues?milestone=`
+      + `${milestone.number}&state=open&per_page=100`, { all: true }))
+      .filter((i) => !i.pull_request && typeof i.title === "string");
+
+    for (const [i, t] of flaky.entries()) {
+      const which = `flaky test ${i + 1} of ${flaky.length}`;
+      const known = open.find((issue) => issue.title.includes(named(t)));
+
+      if (known) {
+        const body = `Flaky again in the full staging run ${url} at ${sha}, `
+          + "which `bin/nff promote main` shipped.";
+        const comment = await api(`repos/${REPO}/issues/${known.number}`
+          + "/comments", { fields: { body } });
+
+        out(`Added the run to issue #${known.number} (${which}): ${
+          printable(comment.html_url)}`);
+      } else {
+        const issue = await api(`repos/${REPO}/issues`, { fields: {
+          title: `Flaky e2e test: ${named(t)}`,
+          milestone: milestone.number,
+          body: `\`${named(t)}\` failed and then passed on a retry `
+            + `(${t.projects.join(", ")}) in the full staging run ${url} at `
+            + `${sha}, which \`bin/nff promote main\` shipped. A flaky `
+            + "test never blocks a release (#693): fix it right after this "
+            + "one.",
+        } });
+
+        out(`Filed issue #${issue.number} (${which}): ${
+          printable(issue.html_url)}`);
+      }
+    }
+  } catch (error) {
+    out(`Could not file the flaky tests on GitHub (${printable(
+      String(error?.message).split("\n")[0])}): file each by hand.`);
+  }
 };
 
 export const promote = async (
@@ -392,6 +539,10 @@ export const promote = async (
   // exemptions that stood in for a green run on it, when any did.
   let tested = sha;
   let exempted;
+  // The run that was accepted and its flaky tests (#693), and the
+  // override that accepted a failed one, when it did.
+  let accepted;
+  let overridden;
 
   if (release) {
     const facts = await releaseFacts(sh, sha, there);
@@ -473,18 +624,47 @@ export const promote = async (
 
     if (suite.ok) {
       out(suite.reason);
+      accepted = { run: suite.run,
+        flaky: await flakyOfGreen(api, suite.job, out) };
     } else {
-      // No green full run counts: only the recorded exemption may still
-      // accept a failed one (#654). It throws every refusal.
-      exempted = await stagingExemption({
-        api, show, repo: REPO, staging: STAGING_E2E, sha: tested,
-        refusal: suite.reason,
-      });
-      for (const line of exempted.lines) out(line);
+      // No green full run counts: the recorded exemption (#654) may
+      // still accept a failed one, or the override listed on the
+      // release pull request (#693). Each throws every refusal. The
+      // exemption's own refusal stands unless the pull request lists
+      // tests, or the exemption could not read a log with retries in it.
+      try {
+        exempted = await stagingExemption({
+          api, show, repo: REPO, staging: STAGING_E2E, sha: tested,
+          refusal: suite.reason,
+        });
+        for (const line of exempted.lines) out(line);
+      } catch (error) {
+        const listed = shippedPast(pr.body);
+
+        if (!listed.size && !error.unread) throw error;
+        overridden = await shipPast(api, {
+          pr, sha: tested, listed, refusal: error,
+        });
+        for (const f of overridden.failures) {
+          out(`shipped past, as PR #${pr.number} lists it: ${named(f)}: ${
+            printable(f.reason)}`);
+        }
+        out(`full e2e failed on staging at ${tested} only on tests PR `
+          + `#${pr.number} lists: ${printable(overridden.run.html_url)}`);
+        accepted = overridden;
+      }
     }
+    for (const t of accepted?.flaky ?? []) out(flakyLine(t));
   }
 
-  if (dryRun) return out(`Would fast-forward ${target} to ${sha}.`);
+  if (dryRun) {
+    if (accepted?.flaky.length) {
+      out(`Would file ${accepted.flaky.length} flaky test(s) in `
+        + `"${FLAKY_MILESTONE}".`);
+    }
+
+    return out(`Would fast-forward ${target} to ${sha}.`);
+  }
 
   await sh(["push", "origin", `${sha}:refs/heads/${target}`]);
 
@@ -495,6 +675,17 @@ export const promote = async (
       after: sha, stagingRun: exempted.stagingRun,
       exemptions: exempted.exemptions,
     });
+  }
+  if (overridden) {
+    log.info({
+      event: "promote.override", by: "cli", target, before: there,
+      after: sha, stagingRun: overridden.run.id,
+      failures: overridden.failures,
+    });
+  }
+  if (accepted) {
+    await fileFlaky(api, { flaky: accepted.flaky, run: accepted.run,
+      sha: tested, out });
   }
 
   return out(`${target} is now at ${sha}.`);

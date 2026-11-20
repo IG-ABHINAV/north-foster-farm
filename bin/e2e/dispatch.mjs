@@ -14,6 +14,7 @@ import { matchesGlob } from "node:path";
 import { promisify } from "node:util";
 
 import { REPO } from "../promote.mjs";
+import { flakyInLog } from "./retries.mjs";
 
 const execute = promisify(execFile);
 
@@ -25,10 +26,12 @@ export const USAGE = `
                                       origin/next (or --base) reach, as
                                       e2e/dispatch.json maps them; wait,
                                       then print each failing test's
-                                      file, name, page and project and
-                                      the run's link. Specs or pages
-                                      named skip the table; --all takes
-                                      every spec it names. The branch
+                                      file, name, page and project, each
+                                      test that passed only on a retry
+                                      as flaky, and the run's link.
+                                      Specs or pages named skip the
+                                      table; --all takes every spec it
+                                      names. The branch
                                       must be pushed. --dry-run prints
                                       the choice and dispatches nothing.
                                       Exits 0 passed, 1 failed, 2
@@ -62,6 +65,8 @@ const PROMOTED = new Set(["next", "staging", "main"]);
 // The run's jobs that only gather the others' results.
 const GATES = new Set(["e2e", "e2e-named", "e2e-burn-in-advisory",
   "e2e-burn-in-named"]);
+// A job of e2e-run.yml, as the caller names it ("narrow / shard 1").
+const SHARD = /(?:^|\/ )shard \d+$/;
 
 const unique = (list) => [...new Set(list)].sort();
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -161,10 +166,12 @@ export const failuresInLog = (log) => {
   const test = /^\s*(?:\d+\) )?\[([^\]]+)\] › (e2e\/[^:\s]+):(\d+):\d+ › (.+)$/;
   const found = new Map();
   const add = (m) => {
-    const [, project, file, line, title] = m;
-    const key = `${file}\n${title.trim()}`;
+    const [, project, file, line, raw] = m;
+    // A closing-list line may end in a rule of "─" (#693's logs).
+    const title = raw.trim().replace(/[─ ]+$/u, "");
+    const key = `${file}\n${title}`;
     const seen = found.get(key)
-      || { file, line: Number(line), title: title.trim(), projects: [] };
+      || { file, line: Number(line), title, projects: [] };
 
     if (!seen.projects.includes(project)) seen.projects.push(project);
     found.set(key, seen);
@@ -323,16 +330,58 @@ const printChoice = (choice, out, { base, how }) => {
 
 const runPath = (id) => `repos/${REPO}/actions/runs/${id}`;
 
-const report = async (api, run, out) => {
+// The flaky tests of every log read, one entry each, with every project
+// it was flaky in (#693).
+const flakyOf = (logs) => {
+  const tests = new Map();
+
+  for (const log of logs) {
+    for (const t of flakyInLog(log) ?? []) {
+      const key = `${t.spec}
+${t.title}`;
+      const seen = tests.get(key);
+
+      if (seen) seen.projects = unique([...seen.projects, ...t.projects]);
+      else tests.set(key, { file: t.spec, line: t.line, title: t.title,
+        projects: t.projects });
+    }
+  }
+
+  return [...tests.values()];
+};
+
+export const flakyLine = (f) => `  flaky, passed on a retry: ${f.file}:${
+  f.line} › ${f.title} (${f.projects.join(", ")})`;
+
+// The run's jobs, and the log of each job a test ran in: every failed
+// one but the gates, and every green shard, which may hold a test that
+// passed on a retry.
+const jobLogs = async (api, run) => {
   const { jobs = [] } = await api(`${runPath(run.id)}/jobs?per_page=100`);
+  const read = jobs.filter((j) => !GATES.has(j.name)
+    && (j.conclusion === "failure"
+      || (j.conclusion === "success" && SHARD.test(String(j.name)))));
+  const logs = [];
+
+  for (const job of read) {
+    logs.push({
+      job, log: await api(`repos/${REPO}/actions/jobs/${job.id}/logs`),
+    });
+  }
+
+  return { jobs, logs };
+};
+
+const report = async (api, run, out) => {
+  const { jobs, logs } = await jobLogs(api, run);
   const failed = jobs.filter((j) => j.conclusion === "failure");
   const tests = new Map();
 
-  for (const job of failed.filter((j) => !GATES.has(j.name))) {
-    const log = await api(`repos/${REPO}/actions/jobs/${job.id}/logs`);
-
+  for (const { job, log } of logs) {
+    if (job.conclusion !== "failure") continue;
     for (const f of failuresInLog(log)) {
-      const key = `${f.file}\n${f.title}`;
+      const key = `${f.file}
+${f.title}`;
       const seen = tests.get(key);
 
       if (seen) seen.projects = unique([...seen.projects, ...f.projects]);
@@ -344,6 +393,7 @@ const report = async (api, run, out) => {
     : `Failed (${printable(run.conclusion)})`}: ${printable(run.html_url)}`);
   if (tests.size) {
     for (const f of tests.values()) out(failureLine(f));
+    for (const f of flakyOf(logs.map((l) => l.log))) out(flakyLine(f));
 
     return;
   }
@@ -354,6 +404,7 @@ const report = async (api, run, out) => {
     out(`  job ${printable(job.name)}${
       step ? `, at "${printable(step.name)}"` : ""}`);
   }
+  for (const f of flakyOf(logs.map((l) => l.log))) out(flakyLine(f));
 };
 
 // The flags e2e reads. bin/nff's parser takes any `--name`, so a typo
@@ -540,6 +591,16 @@ const verdict = async (d, id, url, out) => {
   const { run } = seen;
 
   if (run.conclusion === "success") {
+    // A pass may hold tests that passed only on a retry: named, never
+    // hidden (#693), above the verdict, which stays the last line. Not
+    // reading them leaves the pass a pass.
+    try {
+      const { logs } = await jobLogs(d.api, run);
+
+      for (const f of flakyOf(logs.map((l) => l.log))) out(flakyLine(f));
+    } catch (error) {
+      out(`  could not read which tests were flaky: ${firstLine(error)}`);
+    }
     out(`Passed: ${printable(run.html_url)}`);
 
     return PASSED;

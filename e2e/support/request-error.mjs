@@ -81,6 +81,21 @@ export const requestError = (method, url, error, what = "") => new Error(
     pathOf(url)}: ${kindOf(error)}`
 );
 
+// The kinds of failure that happen at the transport, before any HTTP
+// answer: the connection was refused, reset or dropped. A timeout is
+// not one: the server may be working on the request still (#681).
+const TRANSPORT = ["connection refused", "connection reset",
+  "socket hang up", "connection closed"];
+
+// Whether `error` is a failure at the transport.
+export const transportFailure = (error) => TRANSPORT.includes(kindOf(error));
+
+// The line the suite prints when it retries a request: the method, the
+// path and the kind, no more than requestError gives (#681).
+export const retryLine = (method, url, error, retry, retries) => `[e2e] ${
+  String(method).toUpperCase()} ${pathOf(url)}: ${kindOf(error)}, retry ${
+  retry} of ${retries}`;
+
 // Opens a link that carries a credential in its query (a sign-in or
 // confirmation link from an email, the back office's sign-in link, a
 // signed maintenance link) as page.goto does. When the navigation

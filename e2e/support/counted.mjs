@@ -27,7 +27,9 @@ import {
 import {
   challengeError, checkResponse, takeChallenges,
 } from "./challenge.mjs";
-import { maskSessions, requestError } from "./request-error.mjs";
+import {
+  maskSessions, requestError, retryLine, transportFailure,
+} from "./request-error.mjs";
 import { BASE_URL } from "./staging.mjs";
 
 export { expect };
@@ -133,6 +135,19 @@ const maskHeld = async (holder, list) => {
   }
 };
 
+// A GET or HEAD that fails at the transport (a reset, a hang-up: no
+// HTTP answer) is sent again, up to RETRIES times, a little longer
+// apart each time, and each retry prints a line (#681). A request that
+// got an answer, a 500 among them, is never sent again, nor is any
+// other method: a POST may have done its work before the line dropped.
+const RETRIED = ["GET", "HEAD"];
+const RETRIES = 2;
+const PAUSE_MS = 250;
+
+const pause = (ms) => new Promise((done) => {
+  setTimeout(done, ms);
+});
+
 export const watchRequests = (api, spec) => {
   if (watched.has(api)) return api;
   watched.add(api);
@@ -143,18 +158,26 @@ export const watchRequests = (api, spec) => {
   api.fetch = async (urlOrRequest, options) => {
     const url = typeof urlOrRequest === "string"
       ? urlOrRequest : urlOrRequest.url();
+    const method = String((options && options.method)
+      || (typeof urlOrRequest === "string"
+        ? "GET" : urlOrRequest.method())).toUpperCase();
     let res;
 
+    // Once, however many times it is sent.
     countCall(url, BASE_URL, spec);
-    try {
-      res = await fetch.call(api, urlOrRequest, options);
-    } catch (error) {
-      // Playwright's error prints the request's headers (#665).
-      const method = (options && options.method)
-        || (typeof urlOrRequest === "string"
-          ? "GET" : urlOrRequest.method());
-
-      throw requestError(method, url, error);
+    for (let retry = 0; !res; retry += 1) {
+      try {
+        res = await fetch.call(api, urlOrRequest, options);
+      } catch (error) {
+        if (retry < RETRIES && RETRIED.includes(method)
+          && transportFailure(error)) {
+          console.warn(retryLine(method, url, error, retry + 1, RETRIES));
+          await pause(PAUSE_MS * (retry + 1));
+          continue;
+        }
+        // Playwright's error prints the request's headers (#665).
+        throw requestError(method, url, error);
+      }
     }
 
     // Before the response is handed back, so before anything can

@@ -20,6 +20,10 @@ const GYM = "The Village Family Fitness";
 // $100 of credit against three whole chickens, $60 less the $5 tier.
 const CREDIT = 10_000;
 
+// No retries (#693): a retry would grant the credit again and place a
+// second order, paid by it.
+test.describe.configure({ retries: 0 });
+
 test.describe("a member's credit (#471)", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);
 

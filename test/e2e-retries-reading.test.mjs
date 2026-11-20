@@ -39,6 +39,25 @@ describe("bin/e2e/retries.mjs", () => {
     assert.equal(flakyInLog(null), null);
   });
 
+  // #696, security 1: a project goes into a filed issue's body.
+  it("reads a test only in a project the config names", () => {
+    // COMPOSED: the project of one line in a closing list put in.
+    const listed = (text, from, project) => text.replace(
+      new RegExp(`(Z {5})\\[${from}\\] › (e2e\\/zz-retry)`),
+      `$1[${project}] › $2`);
+    const line = (project) => listed(GREEN, "desktop", project);
+
+    assert.notEqual(line("x"), GREEN);
+    assert.notEqual(listed(RED, "phone", "x"), RED);
+    for (const project of ["desktop @someone", "@claude", "desk`top", "x"]) {
+      assert.equal(flakyInLog(line(project)), null, project);
+      assert.equal(retriedInLog(listed(RED, "phone", project)), null,
+        project);
+    }
+    assert.deepEqual(flakyInLog(line("iphone"))
+      .flatMap((t) => t.projects).sort(), ["iphone", "phone"]);
+  });
+
   it("reads failed and flaky apart in a failed run", () => {
     const read = retriedInLog(RED);
 

@@ -13,6 +13,7 @@
 // e2e-retry*.txt). A log is untrusted text: it is read line by line
 // with whole-line patterns, and what comes back is printable().
 
+import { PROJECTS } from "../../e2e/support/projects.mjs";
 import { printable } from "./dispatch.mjs";
 
 // A log line as a person reads it: no timestamp, no escape sequences.
@@ -20,12 +21,16 @@ const bare = (line) => printable(String(line)
   .replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z ?/, "")).trimEnd();
 
 // `[PROJECT] › SPEC:LINE:COL › TITLE`, with the rule of `─` Playwright
-// pads a closing-list line with dropped.
+// pads a closing-list line with dropped. PROJECT must be one of the
+// config's, since it goes into a filed issue's body as the CLI's own
+// words: any other line, an at sign in the brackets say, is not a
+// test, and the list it stands in cannot be read (#696, security 1).
 const TEST = /^ {4}\[([^\]]+)\] › (e2e\/[^\s:]+):(\d+):\d+ › (.+)$/;
 const testOf = (line) => {
   const m = TEST.exec(line.replace(/[─ ]+$/u, ""));
 
-  return m ? { project: m[1], spec: m[2], line: Number(m[3]), title: m[4] }
+  return m && PROJECTS.includes(m[1])
+    ? { project: m[1], spec: m[2], line: Number(m[3]), title: m[4] }
     : null;
 };
 

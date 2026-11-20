@@ -4,6 +4,7 @@
 
 import { defineConfig, devices } from "@playwright/test";
 
+import { PROJECTS } from "./e2e/support/projects.mjs";
 import { stagingEnv } from "./e2e/support/staging.mjs";
 import { MACHINE_COOKIE } from "./netlify/functions/lib/gate.mjs";
 
@@ -84,7 +85,7 @@ const held = [
 // always runs them.
 const quarantined = !local && process.env.E2E_QUARANTINE !== "1";
 
-export default defineConfig({
+const config = defineConfig({
   testDir: "e2e",
   testMatch: "**/*.spec.mjs",
   ...(quarantined ? { grepInvert: /@quarantine/ } : {}),
@@ -152,3 +153,12 @@ export default defineConfig({
     },
   ],
 });
+
+const names = config.projects.map((p) => p.name);
+
+if (names.join() !== PROJECTS.join()) {
+  throw new Error(`The projects are ${names.join(", ")}, but `
+    + "e2e/support/projects.mjs names " + `${PROJECTS.join(", ")}.`);
+}
+
+export default config;

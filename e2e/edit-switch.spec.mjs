@@ -18,7 +18,8 @@ import { withScope } from "./support/stock.mjs";
 
 const UPDATED = "Your order is updated";
 
-test.describe.configure({ mode: "serial" });
+// No retries (#693): a retry would pay a second time on staging.
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test.describe("switching a paid order between pickup and delivery", () => {
   test.skip(!backOffice().ready, BACK_OFFICE_MISSING);

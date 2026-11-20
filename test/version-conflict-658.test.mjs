@@ -28,10 +28,10 @@ const CRITERIA = ["square-version-conflict", "edit-switch-cancel"]
     .find((path) => existsSync(new URL(path, root))));
 
 // The spec at the baseline, 95371fb7 on `next` (last changed in
-// edb93aba).
+// edb93aba), plus only the no-retries guard of #693.
 const SPEC = "e2e/edit-switch.spec.mjs";
 const SPEC_SHA256 =
-  "f0548391ef5cd8dfddbba73fe03ab3e1edfeb43525611b744e066d611e4a2cfa";
+  "3cd143510bf7e95b81957f699e192b98cb59a219dd91e9891c28dd1b30dd3e3d";
 
 describe("#658: the recorded conflict and the e2e spec", () => {
   it("box 6: the version-conflict fixture is recorded from a real " +

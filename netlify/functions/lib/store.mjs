@@ -23,7 +23,11 @@ import { log } from "./log.mjs";
 import { maskEmail } from "./mask.mjs";
 import { ORDER_ID } from "./order-id.mjs";
 
-export const STORES = ["orders", "customers", "auth", "stock", "jobs", "gate"];
+// `recordings` holds the PayPal recorder's window and records (#708,
+// lib/recorder.mjs): private, never backed up, and pruned after 7 days.
+export const STORES = [
+  "orders", "customers", "auth", "stock", "jobs", "gate", "recordings",
+];
 
 // Netlify sets CONTEXT at build time only; a function sees nothing of
 // it (checked 2026-09-23). SITE_CONTEXT is a variable with a value
@@ -193,6 +197,11 @@ export const blobsConfigured = (env = process.env) =>
   !!(env.NETLIFY_BLOBS_CONTEXT || globalThis.netlifyBlobsContext
     || (env.NETLIFY_SITE_ID && env.NETLIFY_AUTH_TOKEN));
 
+// Whether this is a function Netlify runs, rather than the CLI or a
+// test.
+export const onNetlify = (env = process.env) => !!(env.NETLIFY_BLOBS_CONTEXT
+  || globalThis.netlifyBlobsContext);
+
 const memory = new Map();
 
 // Blobs answers that its client retries: a 429, a 5xx, or no answer
@@ -229,9 +238,7 @@ export const stores = (env = process.env) => {
 
   for (const name of STORES) {
     if (blobsConfigured(env)) {
-      const onNetlify = !!(env.NETLIFY_BLOBS_CONTEXT
-        || globalThis.netlifyBlobsContext);
-      const options = onNetlify
+      const options = onNetlify(env)
         ? {
           name: storeName(name, env), consistency: "strong",
           fetch: watchedFetch(name),

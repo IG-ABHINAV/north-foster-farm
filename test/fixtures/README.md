@@ -134,21 +134,20 @@ actor's login. Each JSON file's `_source` names its requests and date.
 
 These need a person; none is scripted.
 
-1. **PayPal and Venmo (PY-14, #151).** With a sandbox buyer and
-   `PAYPAL_ENV=sandbox`: create an order through the staging order page
-   (or `POST /v2/checkout/orders`), approve it as the buyer in a
-   browser, capture it, `GET` the order, refund the capture, `GET` the
-   refund. Save each raw body to `.ignored/fixtures-raw/` in the same
-   envelope shape (`name`, `service: "paypal"`, `seq`, `status`,
-   `request`, `response`) and run `bin/fixtures/scrub`. Do it once with
-   a card and once with Venmo (`enable-funding=venmo`), and once with
-   a capture left `PENDING` if the sandbox can produce one.
-2. **PayPal webhooks.** One real `PAYMENT.CAPTURE.COMPLETED` and one
-   `PAYMENT.CAPTURE.REFUNDED` delivery, with the headers PayPal signed.
-3. **Square webhooks (R4).** One real `refund.updated`, one
+1. **PayPal, Venmo and their webhooks (#708; replaces the by-hand
+   steps here, 2026-11-21).** The recorder saves them as they happen:
+   `bin/nff record open --production` (or `--staging` for the
+   sandbox), pay with Venmo on the order page, refund with
+   `bin/nff orders refund <id> --record --production`, check it with
+   `bin/nff refunds check --record --production`, wait for both
+   webhooks, then `bin/nff record pull --production` and
+   `bin/fixtures/scrub`. Pull writes `.ignored/fixtures-raw/` in the
+   envelope shape above, `service: "paypal"`; records never pulled are
+   deleted after 7 days.
+2. **Square webhooks (R4).** One real `refund.updated`, one
    `order.updated` and one `payment.updated` delivery, with the
    `x-square-hmacsha256-signature` header and the notification URL it
    was signed for. Point a sandbox subscription at a request catcher,
    run a payment and a refund, copy the three bodies.
-4. **Resend 429.** A real rate-limit answer cannot be asked for; copy
+3. **Resend 429.** A real rate-limit answer cannot be asked for; copy
    one from a log if it ever happens.

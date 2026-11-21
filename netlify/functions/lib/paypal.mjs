@@ -16,6 +16,8 @@ import {
 import { real } from "./clock.mjs";
 import * as fake from "./fake-paypal.mjs";
 import { MONEY_FLOOR_MS, timedFetch, timedOut } from "./http.mjs";
+import { cliRecordings, recorder } from "./recorder.mjs";
+import { onNetlify, stores } from "./store.mjs";
 
 const HOSTS = {
   live: "https://api-m.paypal.com",
@@ -222,18 +224,38 @@ const token = async (cfg, fetchImpl, now) => {
 
 export const forgetTokens = () => tokens.clear();
 
+// Where a call records its exchange while a window is open (#708,
+// lib/recorder.mjs): the store it is given, or null for none. Given
+// nothing, a function on Netlify records into its context's
+// `recordings` store, and the CLI into the one `bin/nff --record` set,
+// else nowhere.
+export const recordingsFor = (env, recordings) => {
+  if (recordings !== undefined) return recordings;
+
+  return onNetlify(env) ? stores(env).recordings : cliRecordings();
+};
+
+// `keep(data)`, when given, says whether an answer is worth recording.
+// The token exchange is never recorded: its answer is a secret.
 const call = async (cfg, path, body, {
-  fetchImpl, now, requestId, method = "POST",
+  fetchImpl, now, requestId, method = "POST", recordings = null, keep,
 }) => {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(requestId ? { "PayPal-Request-Id": requestId } : {}),
+  };
+  const sent = method === "GET" ? undefined : JSON.stringify(body || {});
+  const save = recorder(recordings, {
+    request: {
+      method, path, headers, body: sent === undefined ? null : JSON.parse(sent),
+    },
+    now: real(now),
+  });
   const bearer = await token(cfg, fetchImpl, real(now));
   const res = await timedFetch(fetchImpl, `${cfg.host}${path}`, {
     method,
-    headers: {
-      "Authorization": `Bearer ${bearer}`,
-      "Content-Type": "application/json",
-      ...(requestId ? { "PayPal-Request-Id": requestId } : {}),
-    },
-    body: method === "GET" ? undefined : JSON.stringify(body || {}),
+    headers: { "Authorization": `Bearer ${bearer}`, ...headers },
+    body: sent,
   }, {
     cap: path.endsWith("/capture") ? CAPTURE_MS : CALL_MS,
     deadline: cfg.deadline,
@@ -242,6 +264,10 @@ const call = async (cfg, path, body, {
     fail: (message, options) => new PayPalError(message, options),
   });
   const data = await readBody(res, path);
+
+  await save({
+    status: res.status, response: data, keep: !keep || keep(data),
+  });
 
   if (!res.ok) {
     const issue = Array.isArray(data.details) && data.details[0];
@@ -269,6 +295,7 @@ export const createOrder = async (order, key, {
   fetchImpl = globalThis.fetch,
   now = new Date(),
   deadline,
+  recordings,
 } = {}) => {
   if (isFake(env)) return fake.createOrder(order, key, { env });
 
@@ -286,7 +313,8 @@ export const createOrder = async (order, key, {
       shipping_preference: "NO_SHIPPING",
       user_action: "PAY_NOW",
     },
-  }, { fetchImpl, now, requestId: `${key}-create` });
+  }, { fetchImpl, now, requestId: `${key}-create`,
+    recordings: recordingsFor(env, recordings) });
 
   if (!data.id) {
     throw new PayPalError("PayPal returned no order id", { detail: data });
@@ -323,13 +351,15 @@ export const getOrder = async (paypalOrderId, {
   fetchImpl = globalThis.fetch,
   now = new Date(),
   deadline,
+  recordings,
 } = {}) => {
   if (isFake(env)) return fake.getOrder(paypalOrderId, { env });
 
   const cfg = { ...settings(env), deadline };
   const data = await call(
     cfg, `/v2/checkout/orders/${paypalOrderId}`, null,
-    { fetchImpl, now, method: "GET" }
+    { fetchImpl, now, method: "GET",
+      recordings: recordingsFor(env, recordings) }
   );
 
   return {
@@ -349,6 +379,7 @@ export const captureOrder = async (paypalOrderId, key, {
   fetchImpl = globalThis.fetch,
   now = new Date(),
   deadline,
+  recordings,
 } = {}) => {
   if (isFake(env)) return fake.captureOrder(paypalOrderId, key, { env });
 
@@ -357,12 +388,13 @@ export const captureOrder = async (paypalOrderId, key, {
 
   try {
     data = await call(cfg, `/v2/checkout/orders/${paypalOrderId}/capture`,
-      {}, { fetchImpl, now, requestId: `${key}-capture` });
+      {}, { fetchImpl, now, requestId: `${key}-capture`,
+        recordings: recordingsFor(env, recordings) });
   } catch (error) {
     if (error.code !== "ORDER_ALREADY_CAPTURED") throw error;
 
     const current = await getOrder(paypalOrderId, {
-      env, fetchImpl, now, deadline,
+      env, fetchImpl, now, deadline, recordings,
     });
 
     if (!current.capture) throw error;
@@ -391,6 +423,7 @@ export const refundCapture = async ({
   env = process.env,
   fetchImpl = globalThis.fetch,
   now = new Date(),
+  recordings,
 } = {}) => {
   if (isFake(env)) {
     return fake.refundCapture({
@@ -403,7 +436,8 @@ export const refundCapture = async ({
     `/v2/payments/captures/${paypalCaptureId}/refund`, {
       amount: { currency_code: "USD", value: value(amount) },
       note_to_payer: note ? String(note).slice(0, 255) : undefined,
-    }, { fetchImpl, now, requestId: `${key}-refund` });
+    }, { fetchImpl, now, requestId: `${key}-refund`,
+      recordings: recordingsFor(env, recordings) });
 
   return {
     paypalRefundId: data.id,
@@ -418,12 +452,14 @@ export const getRefund = async (paypalRefundId, {
   env = process.env,
   fetchImpl = globalThis.fetch,
   now = new Date(),
+  recordings,
 } = {}) => {
   if (isFake(env)) return fake.getRefund(paypalRefundId, { env });
 
   const cfg = settings(env);
   const data = await call(cfg, `/v2/payments/refunds/${paypalRefundId}`,
-    null, { fetchImpl, now, method: "GET" });
+    null, { fetchImpl, now, method: "GET",
+      recordings: recordingsFor(env, recordings) });
 
   return {
     paypalRefundId: data.id,
@@ -446,6 +482,7 @@ export const verifyWebhook = async (headers, body, {
   env = process.env,
   fetchImpl = globalThis.fetch,
   now = new Date(),
+  recordings,
 } = {}) => {
   if (isFake(env)) return fake.verifyWebhook(headers, body, { env });
 
@@ -470,7 +507,11 @@ export const verifyWebhook = async (headers, body, {
     transmission_time: get("paypal-transmission-time"),
     webhook_id: cfg.webhookId,
     webhook_event: event,
-  }, { fetchImpl, now });
+  }, {
+    fetchImpl, now, recordings: recordingsFor(env, recordings),
+    // A delivery PayPal would not vouch for is not recorded.
+    keep: (data) => data.verification_status === "SUCCESS",
+  });
 
   return data.verification_status === "SUCCESS";
 };

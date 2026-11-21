@@ -20,10 +20,12 @@
 import { alert, mark } from "./lib/health.mjs";
 import { json } from "./lib/http.mjs";
 import { log, withLog } from "./lib/log.mjs";
+import { real } from "./lib/clock.mjs";
 import {
-  SIGNATURE_HEADER, verifyWebhook, webhookConfigured,
+  SIGNATURE_HEADER, recordingsFor, verifyWebhook, webhookConfigured,
 } from "./lib/paypal.mjs";
 import { recordRefund } from "./lib/payments.mjs";
+import { recorder } from "./lib/recorder.mjs";
 import {
   checkoutByPayPal, orderByPayment, paymentsOf, refundsOf,
 } from "./lib/records.mjs";
@@ -166,7 +168,7 @@ export const handle = async (req, {
 } = {}) => {
   const body = await req.text();
   const reason = await rejection(req.headers, body, {
-    env, verify, fetchImpl, now,
+    env, verify, fetchImpl, now, recordings: stores.recordings,
   });
 
   if (reason) {
@@ -188,6 +190,16 @@ export const handle = async (req, {
     return json(400, { error: "Expected a PayPal event." });
   }
 
+  // While a window is open, the event and the answer it gets (#708).
+  // Only an accepted delivery: a rejected one costs no read and is
+  // never saved. The window is read while the event is applied.
+  const save = recorder(recordingsFor(env, stores.recordings), {
+    request: {
+      method: "POST", path: "/api/paypal/webhook", headers: req.headers,
+    },
+    now: real(now),
+  });
+
   await mark(stores, "webhook", { type: event.event_type }, now);
 
   const result = await applyEvent(stores, event, {
@@ -195,6 +207,7 @@ export const handle = async (req, {
   });
 
   log.info({ event: "paypal.webhook", type: event.event_type, ...result });
+  await save({ status: 200, response: result, body: event });
 
   return json(200, result);
 };

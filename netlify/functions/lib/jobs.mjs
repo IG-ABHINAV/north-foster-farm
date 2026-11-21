@@ -22,6 +22,8 @@
 //   checkouts   a Venmo checkout nobody finished is dropped after a day
 //   auth        sign-in links and sessions past their expiry are
 //               deleted (#189)
+//   recordings  a PayPal record never pulled is deleted 7 days after
+//               it was saved (lib/recorder.mjs, #708)
 //   open        7:00 daily: a Square order the site made whose payment
 //               failed is reported after a day, in the morning report
 //               too, and cancelled unless the Square deletion kill
@@ -96,6 +98,7 @@ import {
 import { alert, escalate, ping, readCount, readMark } from "./health.mjs";
 import { now as clock } from "./clock.mjs";
 import { log } from "./log.mjs";
+import { prune as pruneRecordings } from "./recorder.mjs";
 import { quietAccounts } from "./retention.mjs";
 import { completeInSquare } from "./complete.mjs";
 import { farmEmails, sendMail } from "./mail.mjs";
@@ -413,6 +416,12 @@ export const runJobs = async (stores, {
     () => sweepCheckouts(stores, realNow, { keep: unrescued }))) || 0;
   report.authSwept = (await step("auth",
     () => sweepAuth(stores, realNow))) || 0;
+  // PayPal records never pulled hold a payer's details: gone after 7
+  // days (#708).
+  report.recordingsPruned = (await step("recordings",
+    () => (stores.recordings
+      ? pruneRecordings(stores.recordings, { now: realNow })
+      : 0))) || 0;
   report.scrubbed = (await step("retention",
     () => scrubDaily(stores, realNow))) || [];
   report.quiet = await step("quietAccounts",

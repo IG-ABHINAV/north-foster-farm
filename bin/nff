@@ -345,6 +345,18 @@ const USAGE = `Usage:
                                       asked of Square or PayPal: the
                                       jobs do it daily; alerts as they
                                       do for one that failed or stalled
+  bin/nff record open [--minutes 60]  save every PayPal request the
+                                      site sends and every PayPal
+                                      webhook, with its answer, until
+                                      the window closes by itself (an
+                                      hour at most); for fixtures
+                                      (#708)
+  bin/nff record close                close the window now
+  bin/nff record pull                 the saved records to
+                                      .ignored/fixtures-raw/, then
+                                      deleted from Blobs; then
+                                      bin/fixtures/scrub. Unpulled
+                                      ones go after 7 days
   bin/nff returns resolve <id> <returnId> [note...]
   bin/nff messages [--all]            messages to the farm not yet
                                       answered, from the contact page
@@ -517,6 +529,9 @@ ${REDEPLOY_USAGE}
   --production, --staging, --preview  act on that deploy context's
                                       data; with none, on the dev
                                       stores, never production's
+  --record                            with a window open, this run's
+                                      PayPal requests (a refund, a
+                                      refund check) are saved too
   --yes                               with --production, skip the typed
                                       confirmation that every cancel,
                                       refund, delete and stock or order
@@ -652,6 +667,8 @@ const [
   groupLog,
   membership,
   { membersCommand },
+  { recordCommand },
+  { recordInto, windowOpen },
 ] = await Promise.all([
   import("../netlify/functions/lib/terms.mjs"),
   import("../netlify/functions/lib/admin.mjs"),
@@ -684,6 +701,8 @@ const [
   import("../netlify/functions/lib/group-log.mjs"),
   import("../netlify/functions/lib/membership.mjs"),
   import("./members.mjs"),
+  import("./recorder.mjs"),
+  import("../netlify/functions/lib/recorder.mjs"),
 ]);
 
 // Who acts in a group's audit log when it is this CLI (#495).
@@ -717,7 +736,8 @@ const VALUED = ["reason", "amount", "note", "at", "until", "n", "since",
   "date", "window", "phone", "contact", "address1", "address2", "town",
   "zip", "cooler", "gate", "delivery-notes", "notes", "key", "site",
   "market", "captured-by", "evidence", "first", "last", "line", "code",
-  "occurrence", "paid", "ref", "preview", "set", "start", "end", "base"];
+  "occurrence", "paid", "ref", "preview", "set", "start", "end", "base",
+  "minutes"];
 // Flags given more than once keep every value, in order: `--line`.
 const REPEATED = ["line"];
 const args = process.argv.slice(2);
@@ -743,6 +763,16 @@ for (let i = 0; i < args.length; i += 1) {
     i += 1;
   } else {
     flags[m[1]] = true;
+  }
+}
+
+// --record: this run's PayPal calls are saved, as the site's are,
+// while a window is open (#708). Said up front when none is.
+if (flags.record && flags.record !== "false") {
+  recordInto(stores.recordings);
+  if (!await windowOpen(stores.recordings, new Date())) {
+    console.error("[nff] --record: no recording window is open, so " +
+      "nothing is saved. bin/nff record open opens one.");
   }
 }
 
@@ -1235,6 +1265,11 @@ const run = async () => {
       by: userInfo().username, out,
       ask: process.stdin.isTTY ? askLine : null,
     });
+  }
+  // The PayPal recorder's window and records (#708, bin/recorder.mjs).
+  // No typed confirmation: nothing here touches an order or money.
+  if (group === "record") {
+    return recordCommand(action, { stores, flags, out, root });
   }
   if (group === "supply") {
     return supplyCommand(action, rest, { flags, out, root });

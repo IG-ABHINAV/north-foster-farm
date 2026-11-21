@@ -522,8 +522,9 @@ const sheet = (doc, { title, id, now }) => {
 
     doc.text(heading, M, 110, { size, bold: true });
     if (id) doc.text(id, RIGHT, 110, { size: 18, bold: true, align: "right" });
-    doc.text(`Printed ${stamp(now)}`, M, BOTTOM + 24, { size: 8, shade: 0.4 });
-    doc.text(FARM_COPY, RIGHT, BOTTOM + 24, {
+    // The foot sits clear of the half inch a printer may crop.
+    doc.text(`Printed ${stamp(now)}`, M, BOTTOM + 12, { size: 8, shade: 0.4 });
+    doc.text(FARM_COPY, RIGHT, BOTTOM + 12, {
       size: 8, bold: true, align: "right",
     });
 

@@ -358,8 +358,9 @@ describe("scheduled pickup emails", () => {
       { order: market(), kind: "new", changes: [] },
     ], { day: "2026-10-06", slips: 2, links });
 
-    has(m.text, "\nDrop site, Saturday, October 17, 46 Institute Lane");
-    has(m.text, `\n${FOSTER_NAME}, Sunday, October 25, Shady Acres`);
+    // Each place by its own name, with its count (#694, spec item 3).
+    assert.match(m.text, /\n\W*North Scituate drop site: 1 slip:?\n/);
+    assert.match(m.text, new RegExp(`\n\\W*${FOSTER_NAME}[^\n]*: 1 slip:?\n`));
     assert.doesNotMatch(m.text, /Market pickup/);
   });
 });

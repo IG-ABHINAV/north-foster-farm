@@ -11,9 +11,9 @@
 // The three kinds: on-farm pickups; market/drop site pickups (the
 // drop site, each market and each pop-up, together); deliveries.
 // James's subjects and bodies (spec items 2 to 4) are pinned as he
-// wrote them, each subject in one constant. His "on" in the 3 PM
-// market/drop site subject, against "for" everywhere else, is pinned
-// as written while he is asked whether it is deliberate. A body is
+// wrote them, each subject in one constant, with his three wording
+// decisions of 2026-11-21 on #701 ("for" in every subject, "on [date]"
+// in every body, no colon after a slip count). A body is
 // read from the email's text with the markup taken off (the bullets
 // and the asterisks), and its bold from the HTML. Every test drives
 // the real 15-minute jobs run with a pinned clock, as round one's
@@ -43,7 +43,7 @@ import { instant } from "../assets/scripts/order/lib/zoned.mjs";
 // The subjects. `day` is "Saturday, 11/21".
 const EVE_ONFARM = (day) => `Packing slips: on-farm pickups for ${day}`;
 const EVE_MARKET = (day) =>
-  `Packing slips: market/drop site pickups on ${day}`;
+  `Packing slips: market/drop site pickups for ${day}`;
 const EVE_DELIVERY = (day) => `Packing slips: deliveries for ${day}`;
 const LATE_ONFARM = (day) =>
   `Packing slips — new since yesterday: on-farm pickups for ${day}`;
@@ -55,14 +55,14 @@ const LATE_DELIVERY = (day) =>
 // The 3 PM body, market/drop site pickups, for Saturday 11/21.
 const EVE_BODY = [
   "Print the attached PDF, which contains packing slips for all market, " +
-    "pop-up, and drop site pickup orders for Saturday, 11/21.",
+    "pop-up, and drop site pickup orders on Saturday, 11/21.",
   "",
   "Any new orders, changes to existing orders, or order cancellations " +
     "received after 3 PM today will be resent tomorrow morning at 6 AM.",
   "",
   "**Included in this packet**",
   "",
-  "• **North Scituate drop site: 2 slips:**",
+  "• **North Scituate drop site: 2 slips**",
   "  • Lee Marchetti (NFF-2611-DS7A)",
   "  • Robin Ashby (NFF-2611-DS9K)",
   "• **Thanksgiving Prep pop-up: 1 slip**",
@@ -73,11 +73,11 @@ const EVE_BODY = [
 const LATE_BODY = [
   "Print the attached PDF, which contains **new, changed, or canceled** " +
     "packing slips for all market, pop-up, and drop site pickup orders " +
-    "for Saturday, 11/21.",
+    "on Saturday, 11/21.",
   "",
   "**Included in this packet**",
   "",
-  "• **North Scituate drop site: 2 slips:**",
+  "• **North Scituate drop site: 2 slips**",
   "  • Lee Marchetti (NFF-2611-DS7A) **(new)**",
   "  • Robin Ashby (NFF-2611-DS9K) **(changed)**",
   "• **Thanksgiving Prep pop-up: 1 slip**",
@@ -469,13 +469,13 @@ describe("#694 round two: packing slips just in time, one email per " +
       const order = lines.indexOf(`${who} (${id})`);
 
       assert.match(lines[first], new RegExp("^Print the attached PDF, " +
-        "which contains packing slips for all .+ orders for Saturday, " +
+        "which contains packing slips for all .+ orders on Saturday, " +
         "11/21\\.$"));
       assert.doesNotMatch(lines[first], /market|drop site/);
       assert.equal(lines[first + 1], linesOf(EVE_BODY.join("\n"))[1].words);
       assert.equal(lines[first + 2], "Included in this packet");
       assert.ok(order > first + 3, `${who} (${id}) is listed: ${m.text}`);
-      assert.match(lines[order - 1], /: 1 slip:?$/, "its count");
+      assert.match(lines[order - 1], /: 1 slip$/, "its count");
     }
 
     // 6 AM: James's example, word for word. Robin and John went at
@@ -502,6 +502,8 @@ describe("#694 round two: packing slips just in time, one email per " +
 
   it("A failed 3 PM send is retried every 15 minutes until it goes, " +
     "identical to the on-time email, and there is no 6 AM catch-up email",
+  // James, 2026-11-21: the retries stop at the 6 AM run; a packet still
+  // owed then is never sent, and the run pings /fail.
   async () => {
     const early = ["NFF-2611-OFE6", "NFF-2611-DSE6"];
     const orders = () => [onFarm(early[0]), atDrop(early[1])];
@@ -571,9 +573,47 @@ describe("#694 round two: packing slips just in time, one email per " +
     assert.deepEqual(idsIn(six[0], [...early, "NFF-2611-DSL6"]),
       ["NFF-2611-DSL6"], "no catch-up: the 3 PM slips are not in it");
 
-    // Still failing at 6 AM: the 6 AM run sends no catch-up email of
-    // its own, and the retry that goes is still the on-time email.
-    await failing(at(SAT, 6), at(SAT, 6, 15));
+    // Still unsent when the 6 AM run starts (James, 2026-11-21: "a copy
+    // should never go out after 6 AM"): retried through 5:45, then
+    // never again. The 6 AM run sends only the late order, puts the
+    // owed packet in no email, and pings /fail; nor does it go later
+    // once mail works again.
+    const stuck = testStores();
+    let mailDown = true;
+    const s = harness({ failWhen: (m) => mailDown && holdsEarly(m) });
+
+    await save(stuck, orders());
+    for (const now of quarters(at(FRI, 15), at(SAT, 5, 45))) {
+      if (now.getTime() === at(FRI, 19).getTime()) {
+        await saveOrder(stuck, atDrop("NFF-2611-DSL6"), at(FRI, 18, 50));
+      }
+      await tick(stuck, s, now);
+
+      const tried = s.tried.filter((t) => t.now === now && holdsEarly(t.m))
+        .map((t) => t.m.subject).sort();
+
+      assert.deepEqual(tried, onTime.map((m) => m.subject),
+        `each 3 PM email is tried again at ${now.toISOString()}`);
+    }
+
+    const sixAm = at(SAT, 6);
+    const pingsBefore = s.pings.length;
+    const stuckSix = await tick(stuck, s, sixAm, LIVE);
+
+    assert.deepEqual(stuckSix.map((m) => m.subject),
+      [LATE_MARKET("Saturday, 11/21")], "only the late email at 6 AM");
+    assert.deepEqual(idsIn(stuckSix[0], [...early, "NFF-2611-DSL6"]),
+      ["NFF-2611-DSL6"], "the owed 3 PM slips are not in it");
+    assert.ok(s.pings.slice(pingsBefore).some((p) => p.url === `${URL}/fail`),
+      "the 6 AM run pings /fail for the packet it owes");
+
+    mailDown = false;
+    for (const now of quarters(at(SAT, 6, 15), at(SAT, 9))) {
+      await tick(stuck, s, now, LIVE);
+    }
+    assert.deepEqual(s.tried.filter((t) => t.now.getTime() >=
+      sixAm.getTime() && holdsEarly(t.m)).map((t) => t.m.subject), [],
+    "the owed 3 PM packet goes in no email at 6 AM or later");
   });
 
   it("A day with nothing to print sends no email", async () => {

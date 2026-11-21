@@ -779,39 +779,52 @@ have said so.
 
 **Packing slips**, just in time (#292, #515, #694, `lib/packing.mjs`;
 rewritten 2026-11-20 for #694, which ended the Sunday week and the
-slips for later days), to `FARM_NOTIFICATIONS_EMAIL`: one email per
-fulfillment group, each with its own PDF to print whole. A group is
-on-farm pickup, each pickup-day place and occasion (the drop site,
-each market, each pop-up), or delivery, and the subject names it the
-farm's way: "North Scituate drop site packing slips for Saturday
-11/21". Each PDF's cover is that group's pick list, each product and
-tier with its total across its slips; then its slips by type, place
-and pickup time.
+slips for later days, and again that night for James's revision), to
+`FARM_NOTIFICATIONS_EMAIL`: one email per kind of fulfillment, each
+with one PDF to print whole. The kinds are on-farm pickups,
+market/drop site pickups (the drop site, each market and each pop-up,
+together) and deliveries. A kind with nothing to print gets no email,
+so a day with nothing at all sends none. Each PDF's cover is that
+kind's pick list, each product and tier with its total across its
+slips; then its slips by type, place and pickup time. The email lists
+each place under the kind with its count, and each order as the
+customer's name and its number: "North Scituate drop site: 2 slips",
+then "Lee Marchetti (NFF-2611-DS7A)".
 
 - **15:00 the day before:** every slip for the next day and only that
   day: new, revised, a reprint of one printed earlier, or a CANCELED
-  sheet for one printed and since cancelled. A day with nothing to
-  print gets one "No packing slips for Saturday 11/21" email instead.
-  It is started by 21:00 or not at all (a packet already started is
-  retried after), and `packing/eve/<day>` keeps it sent with its
-  `cutoff`, the time of the run that fixed the packet.
+  sheet for one printed and since cancelled. Subjects: "Packing slips:
+  on-farm pickups for Saturday, 11/21", "Packing slips: market/drop
+  site pickups for Saturday, 11/21", "Packing slips: deliveries for
+  Saturday, 11/21". It is started by 21:00 or not at all, and
+  `packing/eve/<day>` keeps it sent with its `cutoff`, the time of the
+  run that fixed the packet. A send that fails is retried by every
+  15-minute run until it goes, past midnight if need be, and what
+  goes is the on-time email: the same orders, words and PDF. It stops
+  at the 6:00 run and is never sent after (James, 2026-11-21): a copy
+  after 6:00 would mean the farm's email is failing, the bigger
+  problem.
 - **6:00 the day itself:** only what came in, changed or was cancelled
-  after the 15:00 packet read the orders, in its group's email marked
-  "Late: ", and nothing at all when none is late. It compares with
-  what was printed, not with the time. If the 15:00 packet never went,
-  the day's whole set goes, unmarked. `packing/sent/<day>` stops a
-  second run.
+  after the 15:00 packet read the orders, each order marked "(new)",
+  "(changed)" or "(canceled)", under "Packing slips — new since
+  yesterday: market/drop site pickups for Saturday, 11/21" and the
+  same for the other kinds; nothing for a kind with none late. It
+  compares with what was printed, not with the time. A 15:00 packet
+  that never went counts as printed, so there is no catch-up email,
+  and the run pings the *Packing slips* check's /fail and fails in
+  the jobs run's errors. `packing/sent/<day>` stops a second run.
 
 An order moved off its day after its slip was printed goes, with its
-revision sheet, to the group its old slip is in. What each order's
-slip showed is kept in the jobs store (`packing/printed/<id>`, contact
-details and address only as a hash, 30 days past its date), and a
-reprint comes from comparing the order with it. After the 6:00 run,
-an order due that day that changes anyway (the CLI, a refund noted
-from Square or PayPal) is mailed at once as "Changed after printing",
-with its sheets. The 6:00 run pings the *Packing slips* check once; a
-15:00 success does not ping, so the check's 6:00 schedule stands, and
-after a 15:00 failure the check stays down until the 6:00 run goes.
+revision sheet, to the kind and place its old slip is in. What each
+order's slip showed is kept in the jobs store
+(`packing/printed/<id>`, contact details and address only as a hash,
+30 days past its date), and a reprint comes from comparing the order
+with it. After the 6:00 run, an order due that day that changes
+anyway (the CLI, a refund noted from Square or PayPal) is mailed at
+once as "Changed after printing", with its sheets. The 6:00 run pings
+the *Packing slips* check once; a 15:00 success does not ping, so the
+check's 6:00 schedule stands, and after a 15:00 failure the check
+stays down until the 6:00 run goes.
 The staging toolbar's email library previews the emails and a PDF.
 Staging's own jobs runs put the emails in the outbox, never in a
 mailbox, and a run with `reset` lets the day's 6:00 run go again.

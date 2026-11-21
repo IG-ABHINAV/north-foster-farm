@@ -545,8 +545,10 @@ describe("the email library", () => {
     assert.equal(res.headers.get("content-type"), "application/pdf");
     assert.equal(bytes.subarray(0, 8).toString("latin1"), "%PDF-1.4");
     assert.equal(missing.status, 404);
-    assert.deepEqual(list.emails.find((e) => e.id === "farm-packing-quiet")
-      .attachments, [], "the quiet day carries no PDF");
+    // A day with nothing to print sends no email (#694, spec item 6),
+    // so the library has no "No packing slips" email to show.
+    assert.equal(list.emails.find((e) => e.id === "farm-packing-quiet"),
+      undefined);
   });
 });
 

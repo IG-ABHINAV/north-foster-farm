@@ -157,13 +157,14 @@ describe("#697: no empty Tomorrow email", () => {
 
   it("nothing else the jobs run sends changes", async () => {
     // A day with nothing due tomorrow: everything but the Tomorrow
-    // email, as next sent it on 2026-11-20 (8e7eccae).
+    // email, as next sent it on 2026-11-20 (8e7eccae), less the 3 PM
+    // "No packing slips" email that #694's revision retired (item 6,
+    // which settles item 2 of #697; test/packing-kinds.test.mjs, "A day
+    // with nothing to print sends no email").
     const empty = await runDay(testStores());
 
     assert.deepEqual(empty.filter((m) => !isTomorrow(m)).map(summary), [
       { to: ["farm@x.com"], subject: "Morning report: Tuesday, October 6" },
-      { to: ["farm@x.com"],
-        subject: "No packing slips for Wednesday 10/7" },
     ]);
 
     // A day with orders due tomorrow and after: the same.
@@ -174,19 +175,22 @@ describe("#697: no empty Tomorrow email", () => {
     await saveOrder(stores, order("E", "delivery", "2026-10-08"), placed);
 
     const busy = await runDay(stores);
+    const bySubject = (a, b) => a.subject.localeCompare(b.subject);
 
-    assert.deepEqual(busy.filter((m) => !isTomorrow(m)).map(summary),
-      BUSY_DAY);
+    assert.deepEqual(busy.filter((m) => !isTomorrow(m)).map(summary)
+      .sort(bySubject), [...BUSY_DAY].sort(bySubject));
   });
 });
 
 // Everything but the Tomorrow email on the busy day, as next sent it
-// on 2026-11-20 (8e7eccae).
+// on 2026-11-20 (8e7eccae), with the packing slips' subjects in #694's
+// revision (spec item 2, James's words). The order the emails go in
+// is no part of either spec, so it is not compared.
 const BUSY_DAY = [
   { to: ["farm@x.com"], subject: "Morning report: Tuesday, October 6" },
   { to: ["farm@x.com"],
-    subject: "Delivery packing slips for Wednesday 10/7" },
+    subject: "Packing slips: deliveries for Wednesday, 10/7" },
   { to: ["farm@x.com"],
-    subject: "On-farm pickup packing slips for Wednesday 10/7" },
+    subject: "Packing slips: on-farm pickups for Wednesday, 10/7" },
   { to: ["pat@example.com"], subject: "Your delivery is tomorrow" },
 ];

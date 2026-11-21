@@ -1,27 +1,36 @@
 // The packing slips, just in time (#694, 2026-11-20; it replaced the
 // 6:00 AM packet of #292 with its Sunday week, and #515's 3 PM packet
 // with later days' slips in it). A day's slips go to the farm twice,
-// one email per fulfillment group, each with its own PDF holding only
-// that group's pick list and sheets:
+// one email per kind of fulfillment (James's revision of #694,
+// 2026-11-20): on-farm pickups; market/drop site pickups (the drop
+// site, each market and each pop-up, together); deliveries. Each email
+// has one PDF holding all of that kind's slips with its pick list, and
+// a kind with nothing to print gets no email:
 //
 //   3:00 PM the day before   every slip for that day, and only that
 //                            day: a new one, a revised one, a reprint
 //                            of one printed earlier and unchanged, a
 //                            CANCELED sheet for one printed and since
-//                            cancelled. A day with nothing to print
-//                            gets one "No packing slips" email instead
+//                            cancelled. "Packing slips: on-farm
+//                            pickups for Saturday, 11/21"
 //   6:00 AM the day itself   what came in, changed or was cancelled
-//                            after the 3 PM packet, subject marked
-//                            "Late"; nothing when nothing is late. If
-//                            the 3 PM packet never went, the day's
-//                            whole set, unmarked
+//                            after the 3 PM packet, each order marked
+//                            so. "Packing slips — new since yesterday:
+//                            deliveries for Saturday, 11/21"
 //
-// A group is each pickup-day occurrence (the drop site, each market,
-// each pop-up), on-farm pickup, or delivery, named the farm's way in
-// the subject: "North Scituate drop site packing slips for Saturday
-// 11/21" (`packingGroup` and `shortDay` in describe.mjs). An order
-// moved off the day after its slip was printed goes, with its
-// revision sheet, to the group its old slip is in.
+// A 3 PM packet that fails is retried by every 15-minute run, as the
+// on-time email, until it goes or the 6 AM run comes. From then on it
+// is never sent (James, 2026-11-21): the 6 AM run counts it as
+// printed, sends only what is late against it and pings the check's
+// /fail, so there is no catch-up email and no order is printed twice.
+// The subjects and bodies are
+// James's words (`farmPackingSlips` in templates.mjs); the kinds are
+// `PACKING_KINDS` in describe.mjs, and the email lists each place
+// under its kind with its count
+// (`packingGroup`: "North Scituate drop site", "Thanksgiving Prep
+// pop-up"). An order moved off the day after its slip was printed
+// goes, with its revision sheet, to the kind and place its old slip
+// is in.
 //
 // What was printed is kept per order in the jobs store,
 // `packing/printed/<id>`: a snapshot of what its slip showed. A
@@ -30,18 +39,18 @@
 // details, the address and the customer's notes are kept only as a
 // hash: the snapshot says that they changed, the fresh slip says what
 // they are now. `packing/eve/<day>` (the day the slips are for) marks
-// the 3 PM packet sent, and its `cutoff`, the time of the run that
-// fixed it, is where the 6 AM packet's late orders begin.
-// `packing/sent/<day>` marks the 6 AM packet sent; both keep the
-// places of the groups mailed as `groups`.
+// the 3 PM packet sent, and its `cutoff` is the time of the run that
+// fixed it. `packing/sent/<day>` marks the 6 AM packet sent; both keep
+// the kinds mailed as `kinds` and the orders as `ids`. A packet being
+// retried waits in `packing/pending/<day>` (`<day>-eve` at 3 PM).
 //
 // After the 6 AM packet, an order due that day that changes anyway
 // (the farm's CLI, a refund from Square or PayPal) is mailed at once
 // as "Changed after printing", from the next 15-minute run.
 //
 // The 6 AM run pings HEALTHCHECKS_PACKING_URL (production only) once,
-// late slips or none; either run pings its /fail when any group's
-// email could not be built or sent.
+// late slips or none; either run pings its /fail when any kind's email
+// could not be built or sent.
 
 import { createHash } from "node:crypto";
 
@@ -55,7 +64,7 @@ import {
 import { METHODS } from "./checkout.mjs";
 import { company } from "./company.mjs";
 import {
-  methodName, packetCounts, packingGroup, placeOf, shortDay,
+  methodName, packetCounts, packingGroup, packingKind, placeOf, shortDay,
 } from "./describe.mjs";
 import { isScheduled } from "../../../assets/scripts/order/lib/dates.mjs";
 import { ping } from "./health.mjs";
@@ -339,32 +348,45 @@ export const chooseDay = ({ open, printed, gone, day, reprint = false }) =>
       || (e.kind !== "reprint"
         && (printed.get(e.order.id) || {}).date === day));
 
-// The group an entry's sheets go in: its order's, or, for one moved off
-// `day`, the group its printed slip was in.
-const groupOfEntry = (e, printed, day) => {
+// Where an entry's sheets go: its order's fulfilment, or, for one moved
+// off `day`, what its printed slip showed.
+const fulfilmentOf = (e, printed, day) => {
   const was = printed.get(e.order.id);
 
-  return packingGroup(e.order.fulfilment.date !== day && was
+  return e.order.fulfilment.date !== day && was
     ? {
       method: was.snapshot.method, date: was.date,
       ...was.snapshot.occurrence && { occurrence: was.snapshot.occurrence },
     }
-    : e.order.fulfilment);
+    : e.order.fulfilment;
 };
 
-// The entries by packing group, in the order the slips stack.
-// -> [{ key, place, entries }].
-export const groupsOf = (entries, printed, day) => {
-  const groups = new Map();
+// The entries by kind of fulfillment, one email each, and within each
+// kind by place, in the order the slips stack.
+// -> [{ key, noun, on, orders, title, entries,
+//       places: [{ key, place, entries }] }].
+export const kindsOf = (entries, printed, day) => {
+  const kinds = new Map();
 
   for (const e of entries) {
-    const g = groupOfEntry(e, printed, day);
+    const f = fulfilmentOf(e, printed, day);
+    const k = packingKind(f);
+    const g = packingGroup(f);
 
-    if (!groups.has(g.key)) groups.set(g.key, { ...g, entries: [] });
-    groups.get(g.key).entries.push(e);
+    if (!kinds.has(k.key)) {
+      kinds.set(k.key, { ...k, entries: [], places: new Map() });
+    }
+
+    const kind = kinds.get(k.key);
+
+    kind.entries.push(e);
+    if (!kind.places.has(g.key)) kind.places.set(g.key, { ...g, entries: [] });
+    kind.places.get(g.key).entries.push(e);
   }
 
-  return [...groups.values()];
+  return [...kinds.values()].map((k) => ({
+    ...k, places: [...k.places.values()],
+  }));
 };
 
 const startOf = (order) => {
@@ -994,10 +1016,11 @@ export const packetPdf = ({
   return doc.bytes();
 };
 
-// A packet's cover title: its group's place, marked when late; or, for
-// a whole day's preview, the day.
+// A packet's cover title: its kind ("Market/drop site pickups"), after
+// "New since yesterday: " at 6 AM; or, for a whole day's preview, the
+// day.
 export const packetTitle = (day, { place = null, late = false } = {}) =>
-  (place ? `${late ? "Late: " : ""}${place}`
+  (place ? `${late ? "New since yesterday: " : ""}${place}`
     : `Packing slips for ${shortDay(day)}`);
 
 export const fileName = (day, suffix = "") =>
@@ -1007,7 +1030,7 @@ export const fileName = (day, suffix = "") =>
 export const slugOf = (place) => place.toLowerCase()
   .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-// A group's PDF: "packing-slips-2026-11-21-north-scituate-drop-site.pdf",
+// A kind's PDF, by its key: "packing-slips-2026-11-21-market.pdf",
 // "-late" before ".pdf" at 6 AM.
 export const groupFileName = (day, place, late = false) =>
   fileName(day, `-${slugOf(place)}${late ? "-late" : ""}`);
@@ -1027,9 +1050,15 @@ const GONE = ["cancelled", "abandoned"];
 // The orders to pack, and each printed order since cancelled (or
 // deleted) and not yet past its date. A fulfilled one drops out. The
 // morning packet reads every order, so an unpaid one is found too;
-// the check after it reads only the printed ones.
-const gather = async (stores, day, { every = true } = {}) => {
+// the check after it reads only the printed ones. `owed` is a 3 PM
+// packet not yet sent: each of its orders counts as printed as that
+// packet shows it, since its retry will bring the farm that slip.
+const gather = async (stores, day, { every = true, owed = [] } = {}) => {
   const printed = await readPrinted(stores);
+
+  for (const r of owed) {
+    printed.set(r.id, { id: r.id, date: r.date, snapshot: r.snapshot });
+  }
   const orders = every
     ? await allOrders(stores)
     : (await Promise.all([...printed.keys()]
@@ -1122,21 +1151,22 @@ export const missingPingKey = (env) => sendsForReal(env) && !env[PING_KEY];
 // --- Sending a packet ---------------------------------------------------
 
 // One packet, the 3 PM one or the morning's, to the farm: one email per
-// group, each with its own PDF. With no group at all, `quiet` sends
-// the one email saying so (the 3 PM packet); the morning sends none.
+// kind of fulfillment, each with its own PDF. A packet with nothing in
+// it sends nothing (#694, James's revision: no "No packing slips"
+// email).
 //
 // The first try fixes the packet in `pendingKey`: its time and each
 // order with what its sheet shows. A retry sends the same orders with
-// the same time, so a group whose send was answered, or whose answer
+// the same time, so a kind whose send was answered, or whose answer
 // was lost, is not sent twice: Resend answers the same key with the
 // first send. If an order changed in between, the body differs and
-// Resend refuses the key; the first send went out, so that group
+// Resend refuses the key; the first send went out, so that kind
 // counts as sent, as the pending record printed it, and the change is
-// caught later. Every group is tried; if any fails, nothing is
+// caught later. Every kind is tried; if any fails, nothing is
 // recorded printed and the run throws, so the next one tries again.
-// Each group that goes adds its orders to the pending record's `sent`
+// Each kind that goes adds its orders to the pending record's `sent`
 // as it goes (2026-11-20, #694). The run that finishes records every
-// one of them printed, from its pending snapshot when no group sent it
+// one of them printed, from its pending snapshot when no kind sent it
 // this time: an order cancelled or moved before the retry has left
 // today's choice, yet its slip is on the farm's pile, so the next
 // packet or "Changed after printing" brings its CANCELED or revised
@@ -1147,11 +1177,17 @@ export const missingPingKey = (env) => sendsForReal(env) && !env[PING_KEY];
 // the orders are read. What governs is the snapshot each order is
 // printed with, not the time: an order saved in that gap is in the
 // packet though stamped after it, and one saved after the read is the
-// next packet's. -> the summary.
+// next packet's.
+//
+// `taken` names orders another packet has printed, or will print,
+// since this one was fixed: the 6 AM packet's, for a 3 PM retry that
+// goes after it (qa on PR #701, 2026-11-21). A retry leaves them out,
+// so no order is printed twice, and counts them as recorded without
+// writing over what that packet printed. -> the summary.
 const sendPacket = async (stores, {
   day, to, mail, env, now, pending: fixed, pendingKey, sentKey,
-  idempotencyKey, event, entries: chosen, printed, late = false, next = null,
-  since = null, quiet = false,
+  idempotencyKey, event, entries: chosen, printed, late = false,
+  taken = new Set(),
 }) => {
   let entries = chosen;
   let pending = fixed;
@@ -1159,7 +1195,8 @@ const sendPacket = async (stores, {
   if (pending) {
     const ids = new Set(pending.entries.map((e) => e.id));
 
-    entries = entries.filter((e) => ids.has(e.order.id));
+    entries = entries.filter((e) => ids.has(e.order.id)
+      && !taken.has(e.order.id));
   } else {
     pending = {
       at: now.toISOString(),
@@ -1169,16 +1206,16 @@ const sendPacket = async (stores, {
   }
 
   const stamp = new Date(pending.at);
-  const groups = groupsOf(entries, printed, day);
+  const kinds = kindsOf(entries, printed, day);
   const links = mailLinks(env);
   const records = [];
   const failed = [];
   const asPending = (ids) => pending.entries
     .filter((r) => ids.includes(r.id))
     .map((r) => ({ id: r.id, date: r.date, snapshot: r.snapshot }));
-  // Each group that goes adds its orders to `pending.sent` at once, so
+  // Each kind that goes adds its orders to `pending.sent` at once, so
   // a retry still records them printed when a change since has taken
-  // them out of today's choice and no group sends them again.
+  // them out of today's choice and no kind sends them again.
   const went = async (ids) => {
     const sent = pending.sent || [];
     const more = ids.filter((id) => !sent.includes(id));
@@ -1204,61 +1241,63 @@ const sendPacket = async (stores, {
     await went(ids);
   };
 
-  for (const g of groups) {
-    const filename = groupFileName(day, g.place, late);
-
+  for (const k of kinds) {
     await send({
-      idempotencyKey: `${idempotencyKey}-${g.key}`,
-      ...farmPackingSlips(g.entries, {
-        day, place: g.place, late, next, since, links,
-        ...countsOf(g.entries),
+      idempotencyKey: `${idempotencyKey}-${k.key}`,
+      ...farmPackingSlips(k.entries, {
+        day, kind: k, places: k.places, late, at: EVE_TIME,
+        next: PACKING_TIME, links,
       }),
-      attachments: [attachment(filename, packetPdf({
-        entries: g.entries, now: stamp, day, env,
-        title: packetTitle(day, { place: g.place, late }),
+      attachments: [attachment(groupFileName(day, k.key, late), packetPdf({
+        entries: k.entries, now: stamp, day, env,
+        title: packetTitle(day, { place: k.title, late }),
       }))],
-    }, g.entries.map((e) => e.order.id));
-  }
-  if (!groups.length && quiet) {
-    await send({
-      idempotencyKey, attachments: [],
-      ...farmPackingSlips([], { day, quiet: true, next, links }),
-    }, []);
+    }, k.entries.map((e) => e.order.id));
   }
   if (failed.length) throw failed[0];
 
   const recorded = new Set(records.map((r) => r.id));
 
   records.push(...asPending((pending.sent || [])
-    .filter((id) => !recorded.has(id))));
+    .filter((id) => !recorded.has(id) && !taken.has(id))));
 
   const summary = {
-    day, late, quiet: !groups.length, ...countsOf(entries),
-    groups: groups.map((g) => g.place),
+    day, late, quiet: !kinds.length, ...countsOf(entries),
+    kinds: kinds.map((k) => k.key),
   };
+  const others = pending.entries.map((r) => r.id)
+    .filter((id) => taken.has(id) && !recorded.has(id));
 
   await remember(stores, records, stamp);
   await stores.jobs.set(sentKey, {
     at: now.toISOString(), cutoff: pending.at, ...summary,
-    ids: records.map((r) => r.id),
+    ids: [...records.map((r) => r.id), ...others],
   });
   await stores.jobs.delete(pendingKey);
 
   return summary;
 };
 
+// The key a day's 3 PM packet waits under while it is owed.
+const evePendingKey = (day) => `${PENDING}${day}-eve`;
+
 // --- The morning run ----------------------------------------------------
 
-// From PACKING_HOUR, once a day: one email per group with the day's
-// late slips, what came in, changed or was cancelled after the 3 PM
-// packet; nothing when none is late. Without a 3 PM packet for the
-// day, the day's whole set, unmarked. Either way the day is marked
-// sent, so "Changed after printing" starts.
+// From PACKING_HOUR, once a day: one email per kind of fulfillment with
+// the day's late slips, what came in, changed or was cancelled after
+// the 3 PM packet, and none for a kind with nothing late. A 3 PM packet
+// still owed counts as printed, so its slips never come at 6 AM: it is
+// never sent from 6 AM on (James, 2026-11-21: a copy after 6 AM means
+// the farm's email is failing, the bigger problem), and this run pings
+// the check's /fail and throws to say so. With no 3 PM packet at all,
+// every slip for the day is new since yesterday. There is no catch-up
+// email (#694, James's revision). Either way the day is marked sent,
+// so "Changed after printing" starts.
 //
-// -> { day, late, quiet, slips, revised, cancelled, groups } or null
-// when nothing was done this run. Throws when a group's email could
-// not go (the next run tries again) or went without its check
-// configured.
+// -> { day, late, quiet, slips, revised, cancelled, kinds } or null
+// when nothing was done this run. Throws when a kind's email could not
+// go (the next run tries again), when the 3 PM packet never went, or
+// when it went without its check configured.
 export const packingDaily = async (stores, {
   env = process.env, mail = sendMail, now = clock(),
   fetchImpl = globalThis.fetch,
@@ -1276,17 +1315,20 @@ export const packingDaily = async (stores, {
   if (!pending && hour >= PACKING_LAST_HOUR) return null;
 
   let result;
+  let owed;
 
   try {
-    const eve = !!(await stores.jobs.get(`${EVE}${day}`));
-    const found = await gather(stores, day);
+    owed = await stores.jobs.get(evePendingKey(day));
+
+    const found = await gather(stores, day, {
+      owed: owed ? owed.entries : [],
+    });
 
     result = await sendPacket(stores, {
       day, to, mail, env, now, pending, pendingKey,
       sentKey: `${SENT}${day}`, idempotencyKey: `packing-${day}`,
       event: "packing.already_sent", printed: found.printed,
-      entries: chooseDay({ ...found, day, reprint: !eve }),
-      late: eve, since: eve ? EVE_TIME : null,
+      entries: chooseDay({ ...found, day }), late: true,
     });
     await prune(stores, day);
   } catch (error) {
@@ -1298,6 +1340,22 @@ export const packingDaily = async (stores, {
       fetchImpl,
     });
     throw error;
+  }
+
+  // The 3 PM packet never went: it is never sent now (James,
+  // 2026-11-21), and the farm's mail is the bigger problem.
+  if (owed) {
+    const message = `The ${EVE_TIME} packing slips for ${day} never went ` +
+      `out, and none goes after ${PACKING_TIME}: the farm's email is not ` +
+      "reaching it. Check the mail log and Resend.";
+
+    log.info({ event: "packing.sent", ...result });
+    log.error({ event: "packing.eve.missed", day });
+    await ping(pingUrl(env), {
+      ok: false, body: scrub({ failed: "packing.eve", day, error: message }),
+      fetchImpl,
+    });
+    throw new Error(message);
   }
 
   await ping(pingUrl(env), { ok: true, fetchImpl });
@@ -1313,43 +1371,34 @@ export const packingDaily = async (stores, {
 
 // --- The 3 PM run -------------------------------------------------------
 
-// From EVE_HOUR, once a day: one email per group with every slip for
-// tomorrow and nothing for a later day (#694), so the farm can pack
-// the night before, or the one email saying none is due. A failure
-// pings the packing check's /fail; a success leaves the check to the
-// morning's packet, which its schedule expects, so after a 3 PM
-// failure the check stays down until the morning's packet goes, even
-// if a retry sent the 3 PM one.
-// -> { day, late, quiet, slips, revised, cancelled, groups } or null
-// when nothing was done this run. Throws when a group's email could
-// not go.
-export const packingEve = async (stores, {
-  env = process.env, mail = sendMail, now = clock(),
-  fetchImpl = globalThis.fetch,
-} = {}) => {
-  const day = addDays(today(now, tz), 1);
-  const to = farmEmails(env);
-  const hour = parts(now, tz).hour;
-
-  if (hour < EVE_HOUR || !to.length) return null;
+// The 3 PM packet for `day`: its first try, or the retry of one that
+// failed (`retryOnly` tries nothing new). -> the summary, or null.
+const evePacket = async (stores, day, {
+  env, mail, now, fetchImpl, to, retryOnly,
+}) => {
   if (await stores.jobs.get(`${EVE}${day}`)) return null;
 
-  const pendingKey = `${PENDING}${day}-eve`;
+  const pendingKey = evePendingKey(day);
   const pending = await stores.jobs.get(pendingKey);
 
-  if (!pending && hour >= EVE_LAST_HOUR) return null;
+  if (!pending && retryOnly) return null;
 
   let result;
 
   try {
     const found = await gather(stores, day);
+    // What the day's 6 AM packet printed: it counted this packet's
+    // orders as printed, so an order it sent is never this one's too.
+    // One it still owes is printed by this retry, and its own retry
+    // then finds it printed and leaves it out.
+    const morning = await stores.jobs.get(`${SENT}${day}`);
+    const taken = new Set((morning && morning.ids) || []);
 
     result = await sendPacket(stores, {
       day, to, mail, env, now, pending, pendingKey,
       sentKey: `${EVE}${day}`, idempotencyKey: `packing-eve-${day}`,
       event: "packing.eve.already_sent", printed: found.printed,
-      entries: chooseDay({ ...found, day, reprint: true }),
-      next: PACKING_TIME, quiet: true,
+      entries: chooseDay({ ...found, day, reprint: true }), taken,
     });
   } catch (error) {
     const message = String((error && error.message) || error);
@@ -1363,6 +1412,65 @@ export const packingEve = async (stores, {
   }
 
   log.info({ event: "packing.eve.sent", ...result });
+
+  return result;
+};
+
+// From EVE_HOUR, once a day: one email per kind of fulfillment with
+// every slip for tomorrow and nothing for a later day (#694), so the
+// farm can pack the night before, and no email for a kind with nothing
+// to print. It starts by EVE_LAST_HOUR or not at all.
+//
+// A 3 PM packet that failed is retried by every 15-minute run after,
+// past midnight, until it goes (James's revision of #694): the retry
+// is the on-time email again, its orders and time fixed by the first
+// try, so what goes is what would have gone at 3 PM. It stops at the
+// 6 AM run and is never sent after (James, 2026-11-21); that run sends
+// only what is late against it, never a catch-up, and pings /fail.
+// The next day's 6 AM run prunes it. As a guard, a retry that ever
+// went after the 6 AM packet would leave out each order that packet
+// sent, so none is printed twice (qa on PR #701).
+//
+// A failure pings the packing check's /fail; a success leaves the
+// check to the morning's packet, which its schedule expects, so after
+// a 3 PM failure the check stays down until the morning's packet goes,
+// even if a retry sent the 3 PM one.
+// -> { day, late, quiet, slips, revised, cancelled, kinds } or null
+// when nothing was done this run. Throws when a kind's email could not
+// go.
+export const packingEve = async (stores, {
+  env = process.env, mail = sendMail, now = clock(),
+  fetchImpl = globalThis.fetch,
+} = {}) => {
+  const to = farmEmails(env);
+
+  if (!to.length) return null;
+
+  const date = today(now, tz);
+  const hour = parts(now, tz).hour;
+  const opts = { env, mail, now, fetchImpl, to };
+  let result = null;
+  let failed = null;
+
+  // Yesterday's packet for today, while it is still owed, and only
+  // until the 6 AM run.
+  if (hour < PACKING_HOUR) {
+    try {
+      result = await evePacket(stores, date, { ...opts, retryOnly: true });
+    } catch (error) {
+      failed = error;
+    }
+  }
+  if (hour >= EVE_HOUR) {
+    try {
+      result = (await evePacket(stores, addDays(date, 1), {
+        ...opts, retryOnly: hour >= EVE_LAST_HOUR,
+      })) || result;
+    } catch (error) {
+      failed = failed || error;
+    }
+  }
+  if (failed) throw failed;
 
   return result;
 };

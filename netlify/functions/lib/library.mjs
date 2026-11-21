@@ -13,9 +13,9 @@
 
 import { launchEmail } from "./launch.mjs";
 import { postMailFromBuild } from "./post-mail.mjs";
-import { packingGroup } from "./describe.mjs";
+import { PACKING_KINDS, packingKind } from "./describe.mjs";
 import {
-  EVE_TIME, PACKING_TIME, attachment, byFulfillment, changesBetween, countsOf,
+  EVE_TIME, PACKING_TIME, attachment, byFulfillment, changesBetween,
   fileName, groupFileName, packetPdf, packetTitle, snapshotOf,
 } from "./packing.mjs";
 import * as t from "./templates.mjs";
@@ -322,24 +322,22 @@ export const samplePacket = () => {
   };
 };
 
-// One group's packet from the sample (#694): the entries for `day` in
-// the group `key` names, mailed the day before at 3 PM, or as `late`
-// slips at 6 AM on the day.
-const groupMail = (key, { late = false } = {}) => (links) => {
+// One kind's packet from the sample (#694): the entries of the kind
+// `key` names, for the day of its first, mailed the day before at
+// 3 PM, or as `late` slips at 6 AM on the day.
+const kindMail = (key, { late = false } = {}) => (links) => {
   const { now, entries: all } = samplePacket();
-  const group = (e) => packingGroup(e.order.fulfilment);
-  const entries = all.filter((e) => group(e).key === key);
-  const day = entries[0].order.fulfilment.date;
-  const { place } = group(entries[0]);
-  const filename = groupFileName(day, place, late);
+  const mine = all.filter((e) => packingKind(e.order.fulfilment).key === key);
+  const day = mine[0].order.fulfilment.date;
+  const entries = mine.filter((e) => e.order.fulfilment.date === day);
+  const kind = PACKING_KINDS[key];
 
   return {
     ...t.farmPackingSlips(entries, {
-      day, place, late, links, ...countsOf(entries),
-      ...late ? { since: EVE_TIME } : { next: PACKING_TIME },
+      day, kind, late, at: EVE_TIME, next: PACKING_TIME, links,
     }),
-    attachments: [attachment(filename, packetPdf({
-      entries, now, day, title: packetTitle(day, { place, late }),
+    attachments: [attachment(groupFileName(day, key, late), packetPdf({
+      entries, now, day, title: packetTitle(day, { place: kind.title, late }),
     }))],
   };
 };
@@ -828,26 +826,19 @@ export const library = [
   },
   {
     id: "farm-packing-slips", name: "Packing slips",
-    when: "Every day at 15:00, one email per group (on-farm pickup, each " +
-      "pickup-day place and occasion, delivery) with its slips for the " +
-      "next day",
+    when: "Every day at 15:00, one email per kind of fulfillment (on-farm " +
+      "pickups; market/drop site pickups; deliveries) with its slips for " +
+      "the next day, and none for a kind with nothing to print",
     audience: F, tags: ["report", "delivery", "pickup", "drop site", "pdf"],
-    build: groupMail("delivery"),
+    build: kindMail("delivery"),
   },
   {
     id: "farm-packing-late", name: "Late packing slips",
-    when: "Every day at 6:00, one email per group with an order for the " +
-      "day that came in, changed or was canceled after the 15:00 packet",
+    when: "Every day at 6:00, one email per kind of fulfillment with an " +
+      "order for the day that came in, changed or was canceled after the " +
+      "15:00 packet",
     audience: F, tags: ["report", "drop site", "pdf"],
-    build: groupMail("VFVQ-261017", { late: true }),
-  },
-  {
-    id: "farm-packing-quiet", name: "No packing slips",
-    when: "Every day at 15:00 when no order is due the next day",
-    audience: F, tags: ["report"],
-    build: (links) => t.farmPackingSlips([], {
-      day: "2026-10-07", quiet: true, next: PACKING_TIME, links,
-    }),
+    build: kindMail("market", { late: true }),
   },
   {
     id: "farm-changed-after-print", name: "Changed after printing",

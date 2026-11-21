@@ -73,9 +73,9 @@ export const packetCounts = ({ slips = 0, revised = 0, cancelled = 0 }) => [
   cancelled && `${cancelled} canceled`,
 ].filter(Boolean).join(", ");
 
-// "Saturday 11/21": a day as a packing email's subject names it, with
-// no year (#694).
-export const shortDay = (iso) => `${dayName(weekday(iso))} ${
+// "Saturday, 11/21": a day as a packing email names it, with no year
+// (#694; the comma since James's revision, 2026-11-20).
+export const shortDay = (iso) => `${dayName(weekday(iso))}, ${
   Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
 
 // A town and the occasion's name, the town said once: "Pawtucket" and
@@ -93,11 +93,14 @@ export const townAndName = (town, name) => {
     ? name : `${town} ${name}`;
 };
 
-// The packing group an order's slips go in (#694), with the farm's
-// name for its place: each pickup-day occurrence is its own, on-farm
-// pickup and delivery one each. `f` is a fulfilment, or what a
-// printed snapshot kept of one. The drop site is a common noun after
-// its town: "North Scituate drop site". -> { key, place }.
+// The place an order's slips are listed under in a packing email
+// (#694), with the farm's name for it: each pickup-day occurrence is
+// its own, on-farm pickup and delivery one each. `f` is a fulfilment,
+// or what a printed snapshot kept of one. The drop site is a common
+// noun after its town, "North Scituate drop site"; a pop-up is its
+// occasion's name, "Thanksgiving Prep pop-up" (James's revision,
+// 2026-11-20); a market names its town once, "Pawtucket Farmers
+// Market". -> { key, place }.
 export const packingGroup = (f) => {
   if (!isScheduled(f)) return { key: f.method, place: methodName(f.method) };
 
@@ -109,12 +112,42 @@ export const packingGroup = (f) => {
       place: f.occurrence ? `Pickup ${f.occurrence}` : methodName(f.method),
     };
   }
+  if (o.kind === "pop-up") {
+    return {
+      key: o.id,
+      place: /\bpop-up\b/i.test(o.name) ? o.name : `${o.name} pop-up`,
+    };
+  }
 
   const name = o.kind === "drop-site"
     ? o.name[0].toLowerCase() + o.name.slice(1) : o.name;
 
   return { key: o.id, place: townAndName(o.town, name) };
 };
+
+// The three kinds of fulfillment, one packing email each (#694,
+// James's revision, 2026-11-20): what the subject calls the kind, what
+// the body calls its orders, and the PDF's title.
+export const PACKING_KINDS = {
+  onfarm: {
+    key: "onfarm", noun: "on-farm pickups", orders: "on-farm pickup",
+    title: "On-farm pickups",
+  },
+  market: {
+    key: "market", noun: "market/drop site pickups",
+    orders: "market, pop-up, and drop site pickup",
+    title: "Market/drop site pickups",
+  },
+  delivery: {
+    key: "delivery", noun: "deliveries", orders: "delivery",
+    title: "Deliveries",
+  },
+};
+
+// The kind a fulfilment (or a printed snapshot's) belongs to: the drop
+// site, every market and every pop-up are one.
+export const packingKind = (f) => PACKING_KINDS[isScheduled(f) ? "market"
+  : f.method === "delivery" ? "delivery" : "onfarm"];
 
 // A market's place line opens with its name ("Foster Farmers’ Market,
 // Shady Acres Diner, ..."); a note that already names the series wants

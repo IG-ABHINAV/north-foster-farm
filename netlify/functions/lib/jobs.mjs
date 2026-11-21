@@ -39,14 +39,18 @@
 //               nothing is due (#697, 2026-11-20; it went every day
 //               before)
 //   packing     6:00 daily: the day's late slips, one email and PDF
-//               per fulfillment group with an order that came in,
+//               per kind of fulfillment (on-farm pickups, market/drop
+//               site pickups, deliveries) with an order that came in,
 //               changed or was cancelled after the 15:00 packet, and
-//               nothing when none is late; then, all day, an order due
-//               today that changes after it was printed
-//               (lib/packing.mjs; #694, 2026-11-20)
-//   packingEve  15:00 daily, always: every slip for tomorrow and only
-//               tomorrow, one email and PDF per fulfillment group, or
-//               one "No packing slips" email (#515, #694)
+//               nothing for a kind with none late; never a catch-up
+//               of the 15:00 packet; then, all day, an order due today
+//               that changes after it was printed (lib/packing.mjs;
+//               #694, James's revision, 2026-11-20)
+//   packingEve  15:00 daily: every slip for tomorrow and only
+//               tomorrow, one email and PDF per kind of fulfillment,
+//               and no email for a kind with nothing to print; a
+//               failed send retried every run until it goes or the
+//               6:00 run comes, and never sent after (#515, #694)
 //   audience    once a day from 05:00: the farm-news audience in Resend
 //               and the records made to agree
 //   rotation    8:00 on Dec 1 and weekly after, to the developer: the

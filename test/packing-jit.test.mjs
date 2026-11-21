@@ -6,6 +6,10 @@
 // qa's review (2026-11-20), an order mailed on a failed run that is
 // cancelled or moved before the retry. Every
 // order is a fake from the staging library; no mail leaves the test.
+// James's revision that night (one email per kind of fulfillment,
+// test/packing-kinds.test.mjs) moved the retries onto two kinds, the
+// subjects to his words and the day to "Saturday, 11/21", and retired
+// the morning's whole set when no 3 PM packet went.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -18,8 +22,7 @@ import {
 } from "../netlify/functions/lib/library.mjs";
 import { MailError } from "../netlify/functions/lib/mail.mjs";
 import {
-  EVE, PENDING, PING_KEY, SENT, groupFileName, packingDaily, packingEve,
-  readPrinted,
+  EVE, PENDING, PING_KEY, packingDaily, packingEve, readPrinted,
 } from "../netlify/functions/lib/packing.mjs";
 import {
   amendOrder, saveOrder, setStatus,
@@ -48,6 +51,14 @@ const fake = (id, build, fulfilment) => build({
 const atDrop = (id, date = SAT) => fake(id, dropSite,
   occurrence("VFVQ", date));
 const atPrep = (id) => fake(id, popUp, occurrence("W9MF", SAT));
+const onFarm = (id) => fake(id, pickup, { ...pickup().fulfilment, date: SAT });
+const LATE_MARKET = "Packing slips — new since yesterday: market/drop " +
+  "site pickups for Saturday, 11/21";
+
+// An email's PDF, as text; "" when it has none.
+const pdfOf = (m) => (m.attachments && m.attachments.length
+  ? Buffer.from(m.attachments[0].content, "base64").toString("latin1")
+  : "");
 
 const harness = (fail = () => null) => {
   const sent = [];
@@ -95,8 +106,9 @@ describe("a packing group's place (#694)", () => {
   it("names each group the farm's way", () => {
     assert.equal(packingGroup(atDrop("A").fulfilment).place,
       "North Scituate drop site");
+    // A pop-up as James's 3 PM body names it (#694, spec item 3).
     assert.equal(packingGroup(atPrep("B").fulfilment).place,
-      "Pawtucket Thanksgiving Prep");
+      "Thanksgiving Prep pop-up");
     assert.equal(packingGroup(pickup().fulfilment).place, "On-farm pickup");
     assert.equal(packingGroup(delivery().fulfilment).place, "Delivery");
     assert.notEqual(packingGroup(atDrop("A").fulfilment).key,
@@ -105,27 +117,26 @@ describe("a packing group's place (#694)", () => {
   });
 
   it("dates a subject by weekday and month/day, with no year", () => {
-    assert.equal(shortDay("2026-11-21"), "Saturday 11/21");
-    assert.equal(shortDay("2027-01-04"), "Monday 1/4");
-    assert.equal(groupFileName(SAT, "North Scituate drop site", true),
-      "packing-slips-2026-11-21-north-scituate-drop-site-late.pdf");
+    // As James's subjects write it (#694, spec item 2).
+    assert.equal(shortDay("2026-11-21"), "Saturday, 11/21");
+    assert.equal(shortDay("2027-01-04"), "Monday, 1/4");
   });
 });
 
 describe("sending the groups (#694)", () => {
-  it("retries a failed group without sending the others twice",
+  it("retries a failed kind without sending the others twice",
     async () => {
       const stores = testStores();
       let down = true;
-      const h = harness((m) => (down && /Thanksgiving/.test(m.subject)
+      const h = harness((m) => (down && pdfOf(m).includes("NFF-2611-OFR1")
         ? new Error("Resend 503") : null));
 
       await saveOrder(stores, atDrop("NFF-2611-DSR1"), placed);
-      await saveOrder(stores, atPrep("NFF-2611-TPR1"), placed);
+      await saveOrder(stores, onFarm("NFF-2611-OFR1"), placed);
       await assert.rejects(packingEve(stores, opts(h, at(FRI, 15))),
         /Resend 503/);
       assert.equal((await readPrinted(stores)).size, 0,
-        "nothing counts as printed while a group is owed");
+        "nothing counts as printed while a kind is owed");
       assert.ok(await stores.jobs.get(`${PENDING}${SAT}-eve`));
       assert.deepEqual(h.pings, [`${URL}/fail`]);
 
@@ -139,8 +150,8 @@ describe("sending the groups (#694)", () => {
       assert.ok(keys.every((k) => k.startsWith(`packing-eve-${SAT}-`)));
       assert.equal((await readPrinted(stores)).size, 2);
       assert.equal(await stores.jobs.get(`${PENDING}${SAT}-eve`), null);
-      assert.deepEqual((await stores.jobs.get(`${EVE}${SAT}`)).groups,
-        ["North Scituate drop site", "Pawtucket Thanksgiving Prep"]);
+      assert.deepEqual([...(await stores.jobs.get(`${EVE}${SAT}`)).ids]
+        .sort(), ["NFF-2611-DSR1", "NFF-2611-OFR1"]);
     });
 
   it("counts Resend's refusal of a resent key as that group sent",
@@ -160,32 +171,17 @@ describe("sending the groups (#694)", () => {
         ["NFF-2611-DSK1", "NFF-2611-TPK1"]);
     });
 
-  it("sends the day's whole set, unmarked, when no 3 PM packet went",
-    async () => {
-      const stores = testStores();
-      const h = harness();
-
-      await saveOrder(stores, atDrop("NFF-2611-DSW1"), placed);
-      await saveOrder(stores, atDrop("NFF-2611-DSW2", "2026-11-28"),
-        placed);
-      await packingDaily(stores, opts(h, at(SAT, 6)));
-
-      assert.deepEqual(h.sent.map((m) => m.subject),
-        ["North Scituate drop site packing slips for Saturday 11/21"]);
-      assert.equal((await stores.jobs.get(`${SENT}${SAT}`)).late, false);
-      assert.deepEqual(h.pings, [URL]);
-    });
-
-  // The case qa found on PR #695: the drop site goes, Prep fails, and the
-  // drop site's order changes before the retry, which sends only Prep.
+  // The case qa found on PR #695, on two kinds since #694's revision:
+  // the drop site goes, on-farm pickup fails, and the drop site's order
+  // changes before the retry, which sends only on-farm pickup.
   const sentThenChanged = async (change) => {
     const stores = testStores();
     let down = true;
-    const h = harness((m) => (down && /Thanksgiving/.test(m.subject)
+    const h = harness((m) => (down && pdfOf(m).includes("NFF-2611-OFX9")
       ? new Error("Resend 503") : null));
 
     await saveOrder(stores, atDrop("NFF-2611-DSX1"), placed);
-    await saveOrder(stores, atPrep("NFF-2611-TPX9"), placed);
+    await saveOrder(stores, onFarm("NFF-2611-OFX9"), placed);
     await assert.rejects(packingEve(stores, opts(h, at(FRI, 15))),
       /Resend 503/);
     assert.deepEqual((await stores.jobs.get(`${PENDING}${SAT}-eve`)).sent,
@@ -199,20 +195,18 @@ describe("sending the groups (#694)", () => {
     const retry = h.sent.at(-1);
     const printed = await readPrinted(stores);
 
-    assert.match(retry.subject, /Thanksgiving Prep/);
+    assert.match(retry.subject, /on-farm pickups/);
     assert.deepEqual([...printed.keys()].sort(),
-      ["NFF-2611-DSX1", "NFF-2611-TPX9"],
+      ["NFF-2611-DSX1", "NFF-2611-OFX9"],
       "the order mailed on the failed run counts as printed");
     assert.equal(printed.get("NFF-2611-DSX1").date, SAT);
     await packingDaily(stores, opts(h, at(SAT, 6)));
 
     const late = h.sent.at(-1);
 
-    assert.equal(late.subject,
-      "Late: North Scituate drop site packing slips for Saturday 11/21");
+    assert.equal(late.subject, LATE_MARKET);
 
-    return Buffer.from(late.attachments[0].content, "base64")
-      .toString("latin1");
+    return pdfOf(late);
   };
 
   it("cancels an order mailed on a failed run, after the retry",
@@ -233,7 +227,7 @@ describe("sending the groups (#694)", () => {
       assert.match(pdf, /\(REVISED\)/);
     });
 
-  it("tells the group an order left, after its slip was printed",
+  it("tells the kind an order left, after its slip was printed",
     async () => {
       const stores = testStores();
       const h = harness();
@@ -246,11 +240,9 @@ describe("sending the groups (#694)", () => {
       await packingDaily(stores, opts(h, at(SAT, 6)));
 
       const late = h.sent.at(-1);
-      const pdf = Buffer.from(late.attachments[0].content, "base64")
-        .toString("latin1");
+      const pdf = pdfOf(late);
 
-      assert.equal(late.subject,
-        "Late: North Scituate drop site packing slips for Saturday 11/21");
+      assert.equal(late.subject, LATE_MARKET);
       assert.match(pdf, /\(REVISED\)/);
       assert.match(pdf, /Date: was Saturday, November 21, now Saturday, /);
     });

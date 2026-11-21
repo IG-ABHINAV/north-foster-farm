@@ -470,9 +470,9 @@ describe("an order for the 25th", () => {
       .test(m.idempotencyKey || "")), "not before 18:00");
 
     // The evening packet goes from 15:00 (EVE_HOUR, #515), once a day,
-    // one email per group (#694).
-    const packet = (m) => / packing slips for Wednesday 11\/25$/
-      .test(m.subject);
+    // one email per kind of fulfillment (#694).
+    const packet = (m) => m.subject ===
+      "Packing slips: deliveries for Wednesday, 11/25";
 
     assert.ok(early.sent.some(packet),
       early.sent.map((m) => m.subject).join("\n"));

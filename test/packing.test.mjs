@@ -7,6 +7,10 @@
 // rewritten onto the 3 PM packet for tomorrow and the 6 AM late slips,
 // or deleted where the behavior itself is gone: Sunday's week and the
 // 3 PM packet's later days (test/packing-groups.test.mjs pins those).
+// James's revision the same night (one email per kind of fulfillment,
+// test/packing-kinds.test.mjs) took the subjects to his words, the
+// lists to name then order number, and the "No packing slips" email
+// out; the tests here follow it.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -110,7 +114,7 @@ const pdfText = (m) => Buffer.from(m.attachments[0].content, "base64")
   .toString("latin1");
 
 // #694: the 3 PM packet for tomorrow and the 6 AM late slips, one email
-// per fulfillment group. Wednesday 7 October at 3 PM is the packet for
+// per kind of fulfillment. Wednesday 7 October at 3 PM is the packet for
 // Thursday the 8th, the default order's day.
 const WED = "2026-10-07";
 const THU = "2026-10-08";
@@ -144,30 +148,32 @@ const holding = (mails, id) => mails.find((m) => pdfOf(m).includes(id));
 const subjects = (mails) => mails.map((m) => m.subject).join(" | ");
 const count = (text, re) => (text.match(re) || []).length;
 
-// The subjects are drafts, so only their form is tested:
-// `{place} packing slips for {Weekday} {M/D}`, and a late marker.
+// The subjects' form, as James wrote them (#694, spec item 2; the
+// criteria test pins each word for word): `Packing slips: {kind} for
+// {Weekday}, {M/D}` at 3 PM, and `Packing slips — new since
+// yesterday: {kind} for ...` at 6 AM.
 const WEEKDAYS = "Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday";
-const FORM = new RegExp(`^(.+) packing slips for (${WEEKDAYS}) ` +
-  "(\\d{1,2})/(\\d{1,2})$");
-const LATE = /\blate\b:?\s*/i;
+const KINDS = "on-farm pickups|market/drop site pickups|deliveries";
+const DAY = `(${WEEKDAYS}), (\\d{1,2})/(\\d{1,2})$`;
+const FORM = new RegExp(`^Packing slips: (${KINDS}) for ${DAY}`);
+const LATE_FORM = new RegExp("^Packing slips — new since yesterday: " +
+  `(${KINDS}) for ${DAY}`);
 
-// The form, for `day` ("Thursday 10/8"), not marked late.
+// The 3 PM form, for `day` ("Thursday 10/8").
 const assertDay = (subject, day) => {
   const m = FORM.exec(subject);
 
-  assert.ok(m, `"${subject}" reads {place} packing slips for {Weekday} ` +
+  assert.ok(m, `"${subject}" reads Packing slips: {kind} for {Weekday}, ` +
     "{M/D}");
   assert.equal(`${m[2]} ${m[3]}/${m[4]}`, day, subject);
-  assert.doesNotMatch(subject, LATE, `"${subject}" is not late`);
 };
 
-// The same form, marked late.
+// The 6 AM form.
 const assertLate = (subject, day) => {
-  assert.match(subject, LATE, `"${subject}" is marked late`);
+  const m = LATE_FORM.exec(subject);
 
-  const m = FORM.exec(subject.replace(LATE, "").trim());
-
-  assert.ok(m, `"${subject}" reads late {place} packing slips for ...`);
+  assert.ok(m, `"${subject}" reads Packing slips — new since yesterday: ` +
+    "{kind} for ...");
   assert.equal(`${m[2]} ${m[3]}/${m[4]}`, day, subject);
 };
 
@@ -280,15 +286,11 @@ describe("what goes in a packet", () => {
         assert.equal(count(pdfOf(m), /\(Your order\)/g), 1, m.subject);
       }
       assert.ok(holding(first, "DEL-A") !== holding(first, "FARM-B"),
-        "each in its group's email");
+        "each in its kind's email");
 
       assert.deepEqual(late, [], "nothing came in after 3 PM");
-      assert.equal(quiet.length, 1, subjects(quiet));
-      assert.match(quiet[0].subject, /^no packing slips for Friday 10\/9$/i);
-      assert.deepEqual(quiet[0].attachments || [], []);
-      for (const id of ["DEL-A", "FARM-B"]) {
-        assert.ok(!everything(quiet[0]).includes(id), `${id} once`);
-      }
+      assert.deepEqual(quiet, [], "nothing for Friday: no email, and " +
+        "neither order again");
     });
 
   it("waits for 3 PM and 6:00 ET and sends once a day, across a clock " +
@@ -813,14 +815,14 @@ describe("scheduled pickups in a packet", () => {
 
       const [foster] = await evening(stores, h, at("2026-10-24", 15));
 
-      assert.match(drop.text,
-        /\nDrop site, Saturday, October 17, 46 Institute Lane/);
-      assert.match(drop.text, /\n- DROP-A\b/);
-      assert.match(drop.text, /\n- DROP-B\b/);
+      // Each place with its count, then each order as name then order
+      // number under it (#694, spec item 3).
+      assert.match(drop.text, new RegExp("\n\\W*North Scituate drop site: " +
+        "2 slips\n\\s+\\W*Pat Example \\(DROP-A\\)\n" +
+        "\\s+\\W*Pat Example \\(DROP-B\\)\n"));
       assert.doesNotMatch(drop.text, /FOS-C/);
-      assert.match(foster.text,
-        new RegExp(`\n${FOSTER_NAME}, Sunday, October 25, Shady`));
-      assert.match(foster.text, /9:00 AM – 1:00 PM\n- FOS-C\b/);
+      assert.match(foster.text, new RegExp(`\n\\W*${FOSTER_NAME}[^\n]*: ` +
+        "1 slip\n\\s+\\W*Pat Example \\(FOS-C\\)\n"));
       assert.doesNotMatch(foster.text, /DROP-/);
       for (const m of [drop, foster]) {
         assert.doesNotMatch(m.text, /Market pickup/);
@@ -1095,19 +1097,6 @@ describe("the 3 PM packet the day before (#515)", () => {
       ["A"]);
     assert.equal(await stores.jobs.get(`${PENDING}${THURSDAY}-eve`), null);
     assert.equal(await eve(stores, h, at("2026-10-07", 21, 30)), null);
-  });
-
-  it("says when nothing is due tomorrow, and waits after 9 PM", async () => {
-    const stores = testStores();
-    const h = harness();
-
-    assert.deepEqual(await evening(stores, h, at(WED, 21)), []);
-
-    const quiet = await evening(stores, h, at(WED, 20, 45));
-
-    assert.equal(quiet.length, 1, subjects(quiet));
-    assert.match(quiet[0].subject, /^no packing slips for Thursday 10\/8$/i);
-    assert.deepEqual(quiet[0].attachments || [], []);
   });
 
   it("goes from the 15-minute run", async () => {

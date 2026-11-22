@@ -306,6 +306,14 @@ describe("toPx", () => {
   it("reads rem against the root font size", () => {
     assert.equal(toPx("9.25rem", 16), 148);
     assert.equal(toPx(" 15rem ", 20), 300);
+    assert.equal(toPx("2rem", 16, 20), 32);
+  });
+
+  it("reads em against the element's font size", () => {
+    assert.equal(toPx("2em", 16, 20), 40);
+    assert.equal(toPx(" 1.5em ", 16, 10), 15);
+    // When the caller omits the element's size, em falls back to the root's.
+    assert.equal(toPx("2em", 16), 32);
   });
 
   it("reads px and bare numbers as they are", () => {

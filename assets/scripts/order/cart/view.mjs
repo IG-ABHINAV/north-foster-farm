@@ -25,15 +25,17 @@ export const SHEET = "(max-width: 575.98px), "
 
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-// A CSS length from a custom property, as pixels: "9.25rem", "148px"
-// or a bare number. `rootFont` is the root's font size in px.
-export const toPx = (value, rootFont = 16) => {
+// A CSS length from a custom property, as pixels: "9.25rem", "2em",
+// "148px" or a bare number. `rootFont` is the root's font size in px.
+// `emFont` is the font size of the element the property was read from;
+// it defaults to `rootFont` when the caller has no element in hand.
+export const toPx = (value, rootFont = 16, emFont = rootFont) => {
   const text = String(value || "").trim();
   const n = parseFloat(text);
 
   if (!Number.isFinite(n)) return 0;
   if (text.endsWith("rem")) return n * rootFont;
-  if (text.endsWith("em")) return n * rootFont;
+  if (text.endsWith("em")) return n * emFont;
 
   return n;
 };
@@ -167,7 +169,9 @@ export const watchPlacement = (pane, slot, { bar: given, look }) => {
       closedSeen = height;
     }
     closedH = closedSeen || toPx(
-      getComputedStyle(pane).getPropertyValue("--cart-closed-h"), rootFont()
+      getComputedStyle(pane).getPropertyValue("--cart-closed-h"),
+      rootFont(),
+      parseFloat(getComputedStyle(pane).fontSize) || rootFont()
     );
   };
   const forget = () => {
